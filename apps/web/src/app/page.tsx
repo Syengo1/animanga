@@ -22,7 +22,6 @@ export default async function HomePage() {
   let fetchError = false;
 
   try {
-    // 1. Server-side fetch using the strongly typed API client
     const { data, error } = await apiClient.GET("/api/v1/media/trending", {
       params: {
         query: {
@@ -36,12 +35,10 @@ export default async function HomePage() {
     if (error) fetchError = true;
     responseData = data;
   } catch (err) {
-    // Catches hard network errors like ECONNREFUSED during Vercel builds
     console.error("Network error fetching trending media:", err);
     fetchError = true;
   }
 
-  // Defensively extract the array and re-apply the strict Swagger type
   const rawData = responseData?.data;
   const trendingAnime: MediaDto[] = Array.isArray(rawData)
     ? rawData
@@ -57,8 +54,6 @@ export default async function HomePage() {
       <div className="flex-1">
         <section className="relative w-full h-[100svh] bg-black overflow-hidden">
           <InteractiveSphereGallery />
-
-          {/* INJECTED SMART UI COMPONENT */}
           <ScrollIndicator />
         </section>
 
@@ -146,7 +141,7 @@ export default async function HomePage() {
                     <CardContent>
                       <div className="text-sm text-muted-foreground line-clamp-3">
                         {media.synopsis
-                          ? media.synopsis.replace(/<\/?[^>]+(>|$)/g, "") // Strips all rogue HTML tags
+                          ? media.synopsis.replace(/<\/?[^>]+(>|$)/g, "")
                           : "No description available."}
                       </div>
                     </CardContent>
