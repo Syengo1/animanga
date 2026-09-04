@@ -1,0 +1,995 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/system/health": {
+      "get": {
+        "operationId": "SystemController_checkHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/webhooks/daraja/stk": {
+      "post": {
+        "operationId": "WebhookController_handleDarajaStkCallback",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Webhook"
+        ]
+      }
+    },
+    "/api/v1/events": {
+      "post": {
+        "operationId": "EventsController_createEvent",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/api/v1/events/{eventId}/ticket-types": {
+      "post": {
+        "operationId": "EventsController_createTicketType",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/api/v1/events/{eventId}/reserve": {
+      "post": {
+        "operationId": "EventsController_reserveTickets",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/api/v1/events/{eventId}/tickets/validate": {
+      "post": {
+        "operationId": "EventsController_validateTicket",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Events"
+        ]
+      }
+    },
+    "/api/v1/events/{eventId}/scanner/validate": {
+      "post": {
+        "operationId": "ScannerController_validateTicket",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "qrPayload",
+                  "signature"
+                ],
+                "properties": {
+                  "qrPayload": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Validation result determined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "example": "VALID"
+                    },
+                    "ticketId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "nullable": true
+                    },
+                    "ticketType": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "scannedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed payload."
+          },
+          "401": {
+            "description": "Scanner device unauthenticated."
+          },
+          "403": {
+            "description": "Scanner not authorized for this event."
+          }
+        },
+        "security": [
+          {
+            "ScannerAuth": []
+          }
+        ],
+        "summary": "Validate a cryptographic ticket payload at the gate",
+        "tags": [
+          "Events - Gate Scanner"
+        ]
+      }
+    },
+    "/api/v1/tickets/wallet": {
+      "get": {
+        "operationId": "TicketsController_getWallet",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Wallet retrieved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tickets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "ticketNumber": {
+                            "type": "string"
+                          },
+                          "event": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "startTime": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "venue": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "ticketType": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "credential": {
+                            "type": "object",
+                            "properties": {
+                              "payload": {
+                                "type": "object"
+                              },
+                              "signature": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid authentication token."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retrieve the authenticated customer's ticket wallet",
+        "tags": [
+          "Events - Ticket Wallet"
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "operationId": "UserController_getProfile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      },
+      "patch": {
+        "operationId": "UserController_updateProfile",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      }
+    },
+    "/api/v1/users/me/kyc": {
+      "get": {
+        "operationId": "UserController_getKycStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      },
+      "post": {
+        "operationId": "UserController_submitKyc",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      }
+    },
+    "/api/v1/admin/kyc/cases": {
+      "get": {
+        "operationId": "AdminKycController_listPendingCases",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AdminKyc"
+        ]
+      }
+    },
+    "/api/v1/admin/kyc/cases/{id}/approve": {
+      "post": {
+        "operationId": "AdminKycController_approveCase",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AdminKyc"
+        ]
+      }
+    },
+    "/api/v1/admin/kyc/cases/{id}/reject": {
+      "post": {
+        "operationId": "AdminKycController_rejectCase",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "AdminKyc"
+        ]
+      }
+    },
+    "/api/v1/commerce/checkout": {
+      "post": {
+        "operationId": "CommerceController_processCheckout",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Commerce"
+        ]
+      }
+    },
+    "/api/v1/commerce/merchants": {
+      "post": {
+        "operationId": "CommerceController_createMerchant",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Commerce"
+        ]
+      }
+    },
+    "/api/v1/commerce/orders/{id}/refunds": {
+      "post": {
+        "operationId": "CommerceController_requestRefund",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Commerce"
+        ]
+      }
+    },
+    "/api/v1/commerce/payouts": {
+      "post": {
+        "operationId": "CommerceController_requestPayout",
+        "parameters": [],
+        "responses": {
+          "202": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Commerce"
+        ]
+      }
+    },
+    "/api/v1/checkout": {
+      "post": {
+        "operationId": "CheckoutController_checkout",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ticketTypeId",
+                  "quantity",
+                  "phoneNumber"
+                ],
+                "properties": {
+                  "ticketTypeId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "phoneNumber": {
+                    "type": "string",
+                    "example": "254712345678"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Checkout initiated, STK Push sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orderId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "paymentId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "checkoutSessionId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "example": "PENDING"
+                    },
+                    "amount": {
+                      "type": "string",
+                      "example": "3000.0000"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "example": "KES"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (e.g., invalid phone format)."
+          },
+          "401": {
+            "description": "Missing or invalid authentication token."
+          },
+          "409": {
+            "description": "Insufficient ticket inventory."
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Initiate a ticket purchase and M-Pesa STK Push",
+        "tags": [
+          "Commerce - Checkout"
+        ]
+      }
+    },
+    "/api/v1/media/search": {
+      "get": {
+        "operationId": "MediaController_search",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ANIME",
+                "MANGA"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of matching media.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Search for anime or manga across the unified media layer",
+        "tags": [
+          "Content - Media"
+        ]
+      }
+    },
+    "/api/v1/media/trending": {
+      "get": {
+        "operationId": "MediaController_getTrending",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ANIME",
+                "MANGA"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trending media feed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get currently trending anime/manga",
+        "tags": [
+          "Content - Media"
+        ]
+      }
+    },
+    "/api/v1/media/airing": {
+      "get": {
+        "operationId": "MediaController_getAiring",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ANIME",
+                "MANGA"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Currently airing media feed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get currently releasing anime",
+        "tags": [
+          "Content - Media"
+        ]
+      }
+    },
+    "/api/v1/media/seasonal": {
+      "get": {
+        "operationId": "MediaController_getSeasonal",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ANIME",
+                "MANGA"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "year",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "season",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "WINTER",
+                "SPRING",
+                "SUMMER",
+                "FALL"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seasonal media feed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get anime/manga by specific season and year",
+        "tags": [
+          "Content - Media"
+        ]
+      }
+    },
+    "/api/v1/media/{provider}/{externalId}": {
+      "get": {
+        "operationId": "MediaController_getById",
+        "parameters": [
+          {
+            "name": "provider",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": "ANILIST",
+              "type": "string"
+            }
+          },
+          {
+            "name": "externalId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": "154587",
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "ANIME",
+                "MANGA"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Specific media item.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleMediaResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Media not found."
+          }
+        },
+        "summary": "Retrieve specific media by provider identity",
+        "tags": [
+          "Content - Media"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Animanga Platform API",
+    "description": "Strictly defined contracts for Commerce, Events, and Identity",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      },
+      "ScannerAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-scanner-api-key"
+      }
+    },
+    "schemas": {
+      "MediaTitleDto": {
+        "type": "object",
+        "properties": {
+          "romaji": {
+            "type": "string"
+          },
+          "english": {
+            "type": "string"
+          },
+          "native": {
+            "type": "string"
+          }
+        }
+      },
+      "MediaResponseDto": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "ANIME",
+              "MANGA"
+            ]
+          },
+          "title": {
+            "$ref": "#/components/schemas/MediaTitleDto"
+          },
+          "synopsis": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "season": {
+            "type": "string",
+            "nullable": true
+          },
+          "seasonYear": {
+            "type": "number"
+          },
+          "coverImageUrl": {
+            "type": "string"
+          },
+          "bannerImageUrl": {
+            "type": "string"
+          },
+          "colorHex": {
+            "type": "string"
+          },
+          "episodes": {
+            "type": "number"
+          },
+          "chapters": {
+            "type": "number"
+          },
+          "volumes": {
+            "type": "number"
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "averageScore": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "provider",
+          "externalId",
+          "type",
+          "title",
+          "status",
+          "genres"
+        ]
+      },
+      "MediaListResponseDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaResponseDto"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "SingleMediaResponseDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MediaResponseDto"
+          }
+        },
+        "required": [
+          "data"
+        ]
+      }
+    }
+  }
+}

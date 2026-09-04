@@ -1,0 +1,63 @@
+export enum MerchantStatus {
+  PENDING = 'PENDING',
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+  CLOSED = 'CLOSED',
+}
+
+export enum OrderPaymentStatus {
+  UNPAID = 'UNPAID',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+}
+
+export enum FulfillmentStatus {
+  UNFULFILLED = 'UNFULFILLED',
+  PARTIALLY_FULFILLED = 'PARTIALLY_FULFILLED',
+  FULFILLED = 'FULFILLED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum OrderRefundStatus {
+  NOT_REFUNDED = 'NOT_REFUNDED',
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+  FULLY_REFUNDED = 'FULLY_REFUNDED',
+}
+
+export enum OrderItemType {
+  TICKET = 'TICKET',
+  MERCH = 'MERCH',
+}
+
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  AUTHORIZED = 'AUTHORIZED',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  REVERSED = 'REVERSED',
+}
+
+export enum PaymentMethod {
+  MPESA_STK = 'MPESA_STK',
+  MPESA_C2B = 'MPESA_C2B',
+  CARD = 'CARD',
+}
+
+export enum RefundWorkflowStatus {
+  REQUESTED = 'REQUESTED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+}
+
+export enum PayoutStatus {
+  REQUESTED = 'REQUESTED',
+  APPROVED = 'APPROVED',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+}
