@@ -18,15 +18,31 @@ import ScrollIndicator from "@/components/canvas/ScrollIndicator";
 type MediaDto = components["schemas"]["MediaResponseDto"];
 
 export default async function HomePage() {
-  const { data: response, error } = await apiClient.GET(
-    "/api/v1/media/trending",
-    {
-      params: { query: { limit: 6, type: "ANIME" } },
-      next: { revalidate: 3600 },
-    },
-  );
+  let responseData;
+  let fetchError = false;
 
-  const rawData = response?.data;
+  try {
+    // 1. Server-side fetch using the strongly typed API client
+    const { data, error } = await apiClient.GET("/api/v1/media/trending", {
+      params: {
+        query: {
+          limit: 6,
+          type: "ANIME",
+        },
+      },
+      next: { revalidate: 3600 },
+    });
+
+    if (error) fetchError = true;
+    responseData = data;
+  } catch (err) {
+    // Catches hard network errors like ECONNREFUSED during Vercel builds
+    console.error("Network error fetching trending media:", err);
+    fetchError = true;
+  }
+
+  // Defensively extract the array and re-apply the strict Swagger type
+  const rawData = responseData?.data;
   const trendingAnime: MediaDto[] = Array.isArray(rawData)
     ? rawData
     : rawData &&
@@ -63,7 +79,7 @@ export default async function HomePage() {
               </div>
             </div>
 
-            {error && (
+            {fetchError && (
               <div className="p-4 border border-destructive bg-destructive/10 text-destructive rounded-lg">
                 Failed to load trending media. Please try again later.
               </div>
