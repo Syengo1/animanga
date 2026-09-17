@@ -13,7 +13,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { EventsModule } from './modules/events/events.module';
 import { SystemModule } from './modules/system/system.module';
 
-import { RequestIdMiddleware } from './common/middleware/request-id.middleware'; // <-- Added
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 
 import { ContentModule } from './modules/content/content.module';
@@ -24,15 +24,51 @@ import { ContentModule } from './modules/content/content.module';
       isGlobal: true,
       load: [databaseConfig],
     }),
+    // 1. Updated TypeORM to dynamically accept Railway's DATABASE_URL
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) =>
-        configService.get<TypeOrmModuleOptions>('database'),
+      useFactory: (configService: ConfigService) => {
+        const baseConfig =
+          configService.get<TypeOrmModuleOptions>('database') || {};
+        const databaseUrl = configService.get<string>('DATABASE_URL');
+
+        if (databaseUrl) {
+          return {
+            ...baseConfig,
+            type: 'postgres',
+            url: databaseUrl, // TypeORM prioritizes 'url' over individual host/port keys
+          };
+        }
+
+        return baseConfig;
+      },
     }),
-    BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST ?? 'localhost',
-        port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+    // 2. Updated BullMQ to parse Railway's REDIS_URL
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const redisUrl = configService.get<string>('REDIS_URL');
+
+        // BullMQ expects a structured connection object. We use standard URL parsing to split Railway's raw string.
+        if (redisUrl) {
+          const url = new URL(redisUrl);
+          return {
+            connection: {
+              host: url.hostname,
+              port: Number(url.port),
+              username: url.username || undefined,
+              password: url.password || undefined,
+            },
+          };
+        }
+
+        // Fallback for local development
+        return {
+          connection: {
+            host: configService.get<string>('REDIS_HOST', 'localhost'),
+            port: configService.get<number>('REDIS_PORT', 6379),
+          },
+        };
       },
     }),
     // Global Rate Limiting: max 100 requests per IP every 60 seconds
