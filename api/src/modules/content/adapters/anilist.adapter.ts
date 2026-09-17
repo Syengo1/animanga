@@ -3,16 +3,25 @@ import { z } from 'zod';
 import {
   MediaProvider,
   CanonicalMedia,
-  MediaSearchOptions,
+  CanonicalMediaTrend,
+  MediaCandidateOptions,
+  MediaTrendOptions,
   MediaType,
   MediaSeason,
   MediaStatus,
 } from '../interfaces/media-provider.interface';
 
-// Strict Zod Schema for the AniList Node
+// 1. Zod Schemas for Validation
+const AniListFuzzyDateSchema = z.object({
+  year: z.number().nullable().optional(),
+  month: z.number().nullable().optional(),
+  day: z.number().nullable().optional(),
+});
+
 const AniListMediaSchema = z.object({
   id: z.number(),
   type: z.enum(['ANIME', 'MANGA']).nullable().optional(),
+  format: z.string().nullable().optional(),
   title: z
     .object({
       romaji: z.string().nullable().optional(),
@@ -25,6 +34,9 @@ const AniListMediaSchema = z.object({
   status: z.string().nullable().optional(),
   season: z.string().nullable().optional(),
   seasonYear: z.number().nullable().optional(),
+  startDate: AniListFuzzyDateSchema.nullable().optional(),
+  endDate: AniListFuzzyDateSchema.nullable().optional(),
+  duration: z.number().nullable().optional(),
   coverImage: z
     .object({
       extraLarge: z.string().nullable().optional(),
@@ -38,7 +50,23 @@ const AniListMediaSchema = z.object({
   volumes: z.number().nullable().optional(),
   genres: z.array(z.string()).nullable().optional(),
   averageScore: z.number().nullable().optional(),
+  popularity: z.number().nullable().optional(),
+  isAdult: z.boolean().nullable().optional(),
   updatedAt: z.number().nullable().optional(),
+});
+
+const AniListTrendSchema = z.object({
+  mediaId: z.number(),
+  date: z.number(),
+  trending: z.number(),
+  popularity: z.number().nullable().optional(),
+  inProgress: z.number().nullable().optional(),
+  releasing: z.boolean().nullable().optional(),
+  episode: z.number().nullable().optional(),
+  media: z
+    .object({ averageScore: z.number().nullable().optional() })
+    .nullable()
+    .optional(),
 });
 
 interface AniListGraphQLResponse<T> {
@@ -62,12 +90,16 @@ export class AniListAdapter implements MediaProvider {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         },
         body: JSON.stringify({ query, variables }),
       });
 
       if (!response.ok) {
-        throw new Error(`AniList API HTTP Error: ${response.statusText}`);
+        throw new Error(
+          `AniList API HTTP Error: ${response.statusText} (${response.status})`,
+        );
       }
 
       const json = (await response.json()) as AniListGraphQLResponse<T>;
@@ -85,7 +117,17 @@ export class AniListAdapter implements MediaProvider {
     }
   }
 
-  // Strict Mappers for Enum Safety
+  // --- Mappers ---
+
+  private parseFuzzyDate(
+    fuzzy: z.infer<typeof AniListFuzzyDateSchema> | null | undefined,
+  ): Date | undefined {
+    if (!fuzzy?.year) return undefined;
+    const month = fuzzy.month ? fuzzy.month - 1 : 0;
+    const day = fuzzy.day || 1;
+    return new Date(Date.UTC(fuzzy.year, month, day));
+  }
+
   private mapSeason(value: string | null | undefined): MediaSeason {
     switch (value) {
       case 'WINTER':
@@ -118,20 +160,8 @@ export class AniListAdapter implements MediaProvider {
     }
   }
 
-  private mapMediaType(value: string | null | undefined): MediaType {
-    if (value === 'ANIME' || value === 'MANGA') {
-      return value;
-    }
-    this.logger.warn(
-      `Received unknown or null media type from AniList, defaulting to ANIME`,
-    );
-    return 'ANIME';
-  }
-
-  // The Canonical Mapper
   private mapToCanonical(rawMedia: unknown): CanonicalMedia {
     const parseResult = AniListMediaSchema.safeParse(rawMedia);
-
     if (!parseResult.success) {
       this.logger.error(
         `AniList validation failed: ${parseResult.error.message}`,
@@ -140,13 +170,13 @@ export class AniListAdapter implements MediaProvider {
     }
 
     const media = parseResult.data;
-
     return {
       external: {
         provider: this.providerName,
         externalId: media.id.toString(),
       },
-      type: this.mapMediaType(media.type),
+      type: media.type === 'MANGA' ? 'MANGA' : 'ANIME',
+      format: media.format || undefined,
       title: {
         romaji: media.title?.romaji || undefined,
         english: media.title?.english || undefined,
@@ -156,6 +186,9 @@ export class AniListAdapter implements MediaProvider {
       status: this.mapStatus(media.status),
       season: this.mapSeason(media.season),
       seasonYear: media.seasonYear || undefined,
+      startDate: this.parseFuzzyDate(media.startDate),
+      endDate: this.parseFuzzyDate(media.endDate),
+      duration: media.duration || undefined,
       coverImageUrl: media.coverImage?.extraLarge || undefined,
       bannerImageUrl: media.bannerImage || undefined,
       colorHex: media.coverImage?.color || undefined,
@@ -164,78 +197,159 @@ export class AniListAdapter implements MediaProvider {
       volumes: media.volumes || undefined,
       genres: media.genres || [],
       averageScore: media.averageScore || undefined,
+      popularity: media.popularity || undefined,
+      isAdult: media.isAdult || false,
       sourceUpdatedAt: media.updatedAt
         ? new Date(media.updatedAt * 1000)
         : undefined,
     };
   }
 
-  // Implementations
-  async getTrending(type: MediaType, limit = 10): Promise<CanonicalMedia[]> {
+  // --- Provider Contract Implementation ---
+
+  async getMediaCandidates(
+    options: MediaCandidateOptions,
+  ): Promise<CanonicalMedia[]> {
     const query = `
-      query ($type: MediaType, $perPage: Int) {
-        Page(page: 1, perPage: $perPage) {
-          media(type: $type, sort: TRENDING_DESC) {
-            id
-            type
-            title { romaji english native }
-            description
-            status
-            season
-            seasonYear
-            coverImage { extraLarge color }
-            bannerImage
-            episodes
-            chapters
-            volumes
-            genres
-            averageScore
-            updatedAt
+      query (
+        $page: Int, 
+        $perPage: Int, 
+        $type: MediaType, 
+        $status: MediaStatus, 
+        $statusNot: MediaStatus, 
+        $season: MediaSeason, 
+        $seasonYear: Int, 
+        $startDateGreater: FuzzyDateInt, 
+        $startDateLesser: FuzzyDateInt, 
+        $sort: [MediaSort], 
+        $isAdult: Boolean,
+        $search: String
+      ) {
+        Page(page: $page, perPage: $perPage) {
+          media(
+            type: $type, 
+            status: $status, 
+            status_not: $statusNot, 
+            season: $season, 
+            seasonYear: $seasonYear, 
+            startDate_greater: $startDateGreater, 
+            startDate_lesser: $startDateLesser, 
+            sort: $sort, 
+            isAdult: $isAdult,
+            search: $search
+          ) {
+            id type format title { romaji english native } description status
+            season seasonYear duration
+            startDate { year month day } endDate { year month day }
+            coverImage { extraLarge color } bannerImage
+            episodes chapters volumes genres averageScore popularity isAdult updatedAt
           }
         }
       }
     `;
 
+    const variables = {
+      page: options.page || 1,
+      perPage: options.limit || 50,
+      type: options.type || 'ANIME',
+      status: options.status,
+      statusNot: options.statusNot,
+      season: options.season,
+      seasonYear: options.seasonYear,
+      startDateGreater: options.startDateGreater,
+      startDateLesser: options.startDateLesser,
+      sort: options.sort || ['POPULARITY_DESC'],
+      isAdult: options.isAdult ?? false,
+      search: options.search,
+    };
+
+    const result = await this.fetchGraphQL<{ Page: { media: unknown[] } }>(
+      query,
+      variables,
+    );
+    return result.Page.media.map((m) => this.mapToCanonical(m));
+  }
+
+  async getMediaTrends(
+    options: MediaTrendOptions,
+  ): Promise<CanonicalMediaTrend[]> {
+    const query = `
+      query ($page: Int, $perPage: Int, $dateGreater: Int, $dateLesser: Int, $mediaId: Int) {
+        Page(page: $page, perPage: $perPage) {
+          mediaTrend(
+            date_greater: $dateGreater, 
+            date_lesser: $dateLesser, 
+            mediaId: $mediaId, 
+            sort: [DATE_DESC]
+          ) {
+            mediaId date trending popularity inProgress releasing episode
+            media { averageScore }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      page: options.page || 1,
+      perPage: options.limit || 50,
+      dateGreater: options.dateGreater,
+      dateLesser: options.dateLesser,
+      mediaId: options.mediaId,
+    };
+
+    const result = await this.fetchGraphQL<{ Page: { mediaTrend: unknown[] } }>(
+      query,
+      variables,
+    );
+
+    return result.Page.mediaTrend.map((raw) => {
+      const parsed = AniListTrendSchema.parse(raw);
+      return {
+        mediaId: parsed.mediaId.toString(),
+        provider: this.providerName,
+        date: parsed.date,
+        trending: parsed.trending,
+        popularity: parsed.popularity || 0,
+        inProgress: parsed.inProgress || 0,
+        releasing: parsed.releasing || false,
+        episode: parsed.episode || undefined,
+        averageScore: parsed.media?.averageScore || undefined,
+      };
+    });
+  }
+
+  async getMediaByIds(
+    ids: string[],
+    type: MediaType = 'ANIME',
+  ): Promise<CanonicalMedia[]> {
+    if (!ids || ids.length === 0) return [];
+
+    const query = `
+      query ($ids: [Int], $type: MediaType) {
+        Page(page: 1, perPage: 50) {
+          media(id_in: $ids, type: $type) {
+            id type format title { romaji english native } description status
+            season seasonYear duration
+            startDate { year month day } endDate { year month day }
+            coverImage { extraLarge color } bannerImage
+            episodes chapters volumes genres averageScore popularity isAdult updatedAt
+          }
+        }
+      }
+    `;
+
+    const numericIds = ids
+      .map((id) => parseInt(id, 10))
+      .filter((id) => !isNaN(id));
+
     const result = await this.fetchGraphQL<{ Page: { media: unknown[] } }>(
       query,
       {
+        ids: numericIds,
         type,
-        perPage: limit,
       },
     );
 
     return result.Page.media.map((m) => this.mapToCanonical(m));
   }
-
-  /* eslint-disable @typescript-eslint/no-unused-vars */
-
-  // Future Implementations Stubs
-  async search(options: MediaSearchOptions): Promise<CanonicalMedia[]> {
-    return Promise.resolve<CanonicalMedia[]>([]);
-  }
-
-  async getById(
-    externalId: string,
-    type?: MediaType,
-  ): Promise<CanonicalMedia | null> {
-    return Promise.resolve<CanonicalMedia | null>(null);
-  }
-
-  async getCurrentlyReleasing(
-    type: MediaType,
-    limit?: number,
-  ): Promise<CanonicalMedia[]> {
-    return Promise.resolve<CanonicalMedia[]>([]);
-  }
-
-  async getSeasonal(
-    type: MediaType,
-    season: Exclude<MediaSeason, null>,
-    year: number,
-    limit?: number,
-  ): Promise<CanonicalMedia[]> {
-    return Promise.resolve<CanonicalMedia[]>([]);
-  }
-
-  /* eslint-enable @typescript-eslint/no-unused-vars */
 }

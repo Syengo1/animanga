@@ -113,6 +113,26 @@ export class MediaItem {
   })
   averageScore?: string;
 
+  // --- NEW COLUMNS ---
+  @Column({ type: 'integer', nullable: true, default: 0 })
+  popularity?: number;
+
+  @Column({ name: 'is_adult', type: 'boolean', default: false })
+  isAdult!: boolean;
+  // -------------------
+
+  @Column({ name: 'start_date', type: 'timestamptz', nullable: true })
+  startDate?: Date;
+
+  @Column({ name: 'end_date', type: 'timestamptz', nullable: true })
+  endDate?: Date;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  format?: string;
+
+  @Column({ type: 'integer', nullable: true })
+  duration?: number;
+
   @Column({
     name: 'source_updated_at',
     type: 'timestamptz',

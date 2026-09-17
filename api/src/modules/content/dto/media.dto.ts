@@ -4,8 +4,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 // --- 1. INPUT VALIDATION SCHEMAS (ZOD) ---
 
 export const MediaSearchQuerySchema = z.object({
-  q: z.string().min(1, 'Search query cannot be empty'),
+  q: z.string().optional().default(''), // Made optional to allow standalone sorting
   type: z.enum(['ANIME', 'MANGA']).optional().default('ANIME'),
+  sort: z.enum(['TRENDING_DESC', 'POPULARITY_DESC']).optional(), // Added for catalog sorting
   limit: z.coerce.number().min(1).max(50).optional().default(20),
 });
 export type MediaSearchQueryDto = z.infer<typeof MediaSearchQuerySchema>;
@@ -18,9 +19,11 @@ export type MediaFeedQueryDto = z.infer<typeof MediaFeedQuerySchema>;
 
 export const MediaSeasonalQuerySchema = z.object({
   type: z.enum(['ANIME', 'MANGA']).optional().default('ANIME'),
-  season: z.enum(['WINTER', 'SPRING', 'SUMMER', 'FALL']),
-  year: z.coerce.number().min(1950).max(3000),
-  limit: z.coerce.number().min(1).max(50).optional().default(20),
+  timeline: z.enum(['CURRENT', 'NEXT']),
+  status: z
+    .enum(['FINISHED', 'RELEASING', 'NOT_YET_RELEASED', 'CANCELLED', 'HIATUS'])
+    .optional(),
+  limit: z.coerce.number().min(1).max(50).optional().default(15),
 });
 export type MediaSeasonalQueryDto = z.infer<typeof MediaSeasonalQuerySchema>;
 

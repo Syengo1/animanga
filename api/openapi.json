@@ -606,27 +606,23 @@
         "operationId": "MediaController_search",
         "parameters": [
           {
-            "name": "limit",
-            "required": false,
+            "name": "query",
+            "required": true,
             "in": "query",
             "schema": {
-              "type": "number"
-            }
-          },
-          {
-            "name": "type",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "ANIME",
-                "MANGA"
-              ],
               "type": "string"
             }
           },
           {
-            "name": "q",
+            "name": "type",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
             "required": true,
             "in": "query",
             "schema": {
@@ -636,170 +632,11 @@
         ],
         "responses": {
           "200": {
-            "description": "List of matching media.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaListResponseDto"
-                }
-              }
-            }
+            "description": ""
           }
         },
-        "summary": "Search for anime or manga across the unified media layer",
         "tags": [
-          "Content - Media"
-        ]
-      }
-    },
-    "/api/v1/media/trending": {
-      "get": {
-        "operationId": "MediaController_getTrending",
-        "parameters": [
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "number"
-            }
-          },
-          {
-            "name": "type",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "ANIME",
-                "MANGA"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Trending media feed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaListResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Get currently trending anime/manga",
-        "tags": [
-          "Content - Media"
-        ]
-      }
-    },
-    "/api/v1/media/airing": {
-      "get": {
-        "operationId": "MediaController_getAiring",
-        "parameters": [
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "number"
-            }
-          },
-          {
-            "name": "type",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "ANIME",
-                "MANGA"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Currently airing media feed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaListResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Get currently releasing anime",
-        "tags": [
-          "Content - Media"
-        ]
-      }
-    },
-    "/api/v1/media/seasonal": {
-      "get": {
-        "operationId": "MediaController_getSeasonal",
-        "parameters": [
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "number"
-            }
-          },
-          {
-            "name": "type",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "ANIME",
-                "MANGA"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "name": "year",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "number"
-            }
-          },
-          {
-            "name": "season",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "WINTER",
-                "SPRING",
-                "SUMMER",
-                "FALL"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Seasonal media feed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MediaListResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Get anime/manga by specific season and year",
-        "tags": [
-          "Content - Media"
+          "Media"
         ]
       }
     },
@@ -812,7 +649,6 @@
             "required": true,
             "in": "path",
             "schema": {
-              "example": "ANILIST",
               "type": "string"
             }
           },
@@ -821,41 +657,39 @@
             "required": true,
             "in": "path",
             "schema": {
-              "example": "154587",
               "type": "string"
             }
           },
           {
             "name": "type",
-            "required": false,
+            "required": true,
             "in": "query",
             "schema": {
-              "enum": [
-                "ANIME",
-                "MANGA"
-              ],
               "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Specific media item.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SingleMediaResponseDto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Media not found."
+            "description": ""
           }
         },
-        "summary": "Retrieve specific media by provider identity",
         "tags": [
-          "Content - Media"
+          "Media"
+        ]
+      }
+    },
+    "/api/v1/discovery/home": {
+      "get": {
+        "operationId": "DiscoveryController_getHomeFeeds",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Discovery"
         ]
       }
     }
@@ -881,115 +715,6 @@
         "name": "x-scanner-api-key"
       }
     },
-    "schemas": {
-      "MediaTitleDto": {
-        "type": "object",
-        "properties": {
-          "romaji": {
-            "type": "string"
-          },
-          "english": {
-            "type": "string"
-          },
-          "native": {
-            "type": "string"
-          }
-        }
-      },
-      "MediaResponseDto": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string"
-          },
-          "externalId": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "ANIME",
-              "MANGA"
-            ]
-          },
-          "title": {
-            "$ref": "#/components/schemas/MediaTitleDto"
-          },
-          "synopsis": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "season": {
-            "type": "string",
-            "nullable": true
-          },
-          "seasonYear": {
-            "type": "number"
-          },
-          "coverImageUrl": {
-            "type": "string"
-          },
-          "bannerImageUrl": {
-            "type": "string"
-          },
-          "colorHex": {
-            "type": "string"
-          },
-          "episodes": {
-            "type": "number"
-          },
-          "chapters": {
-            "type": "number"
-          },
-          "volumes": {
-            "type": "number"
-          },
-          "genres": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "averageScore": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "provider",
-          "externalId",
-          "type",
-          "title",
-          "status",
-          "genres"
-        ]
-      },
-      "MediaListResponseDto": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MediaResponseDto"
-            }
-          }
-        },
-        "required": [
-          "data"
-        ]
-      },
-      "SingleMediaResponseDto": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/MediaResponseDto"
-          }
-        },
-        "required": [
-          "data"
-        ]
-      }
-    }
+    "schemas": {}
   }
 }

@@ -1,5 +1,5 @@
 export type MediaType = 'ANIME' | 'MANGA';
-
+export type MediaSeason = 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL' | null;
 export type MediaStatus =
   | 'FINISHED'
   | 'RELEASING'
@@ -8,86 +8,76 @@ export type MediaStatus =
   | 'HIATUS'
   | 'UNKNOWN';
 
-export type MediaSeason = 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL' | null;
-
-export interface ExternalMediaReference {
-  provider: string;
-  externalId: string;
-}
-
-/**
- * The Canonical Animanga Media Object.
- * This is the strict representation of media within our ecosystem.
- * Neither the NestJS API edge nor the Next.js frontend should ever
- * see raw provider data (e.g., from AniList or Jikan).
- */
 export interface CanonicalMedia {
-  external: ExternalMediaReference;
-
+  external: {
+    provider: string;
+    externalId: string;
+  };
   type: MediaType;
-
   title: {
     romaji?: string;
     english?: string;
     native?: string;
   };
-
   synopsis?: string;
   status: MediaStatus;
   season: MediaSeason;
   seasonYear?: number;
-
+  startDate?: Date;
+  endDate?: Date;
+  format?: string;
+  duration?: number;
   coverImageUrl?: string;
   bannerImageUrl?: string;
-  colorHex?: string; // Extremely useful for dynamic UI theming
-
+  colorHex?: string;
   episodes?: number;
   chapters?: number;
   volumes?: number;
-
   genres: string[];
-
   averageScore?: number;
-
+  popularity?: number;
+  isAdult?: boolean;
   sourceUpdatedAt?: Date;
-
-  /**
-   * Provider-specific information that is useful for
-   * normalization/debugging but is not part of the
-   * canonical domain contract.
-   */
-  providerMetadata?: Record<string, unknown>;
 }
 
-export interface MediaSearchOptions {
-  query: string;
+export interface CanonicalMediaTrend {
+  mediaId: string;
+  provider: string;
+  date: number; // Unix timestamp or AniList epoch date
+  trending: number;
+  popularity: number;
+  inProgress: number;
+  releasing: boolean;
+  episode?: number;
+  averageScore?: number;
+}
+
+export interface MediaCandidateOptions {
   type?: MediaType;
-  limit?: number;
+  status?: MediaStatus;
+  statusNot?: MediaStatus;
+  season?: MediaSeason;
+  seasonYear?: number;
+  startDateGreater?: number; // YYYYMMDD
+  startDateLesser?: number; // YYYYMMDD
+  sort?: string[];
+  isAdult?: boolean;
+  search?: string;
   page?: number;
+  limit?: number;
 }
 
-/**
- * The strictly enforced interface that all external media APIs
- * (AniList, Jikan, MAL) must adhere to before returning data.
- */
+export interface MediaTrendOptions {
+  dateGreater?: number; // Unix timestamp
+  dateLesser?: number; // Unix timestamp
+  mediaId?: number;
+  page?: number;
+  limit?: number;
+}
+
 export interface MediaProvider {
   readonly providerName: string;
-
-  search(options: MediaSearchOptions): Promise<CanonicalMedia[]>;
-
-  getById(externalId: string, type?: MediaType): Promise<CanonicalMedia | null>;
-
-  getTrending(type: MediaType, limit?: number): Promise<CanonicalMedia[]>;
-
-  getCurrentlyReleasing(
-    type: MediaType,
-    limit?: number,
-  ): Promise<CanonicalMedia[]>;
-
-  getSeasonal(
-    type: MediaType,
-    season: Exclude<MediaSeason, null>,
-    year: number,
-    limit?: number,
-  ): Promise<CanonicalMedia[]>;
+  getMediaCandidates(options: MediaCandidateOptions): Promise<CanonicalMedia[]>;
+  getMediaTrends(options: MediaTrendOptions): Promise<CanonicalMediaTrend[]>;
+  getMediaByIds(ids: string[], type?: MediaType): Promise<CanonicalMedia[]>;
 }
