@@ -27,7 +27,8 @@ import { ContentModule } from './modules/content/content.module';
     // 1. Updated TypeORM to dynamically accept Railway's DATABASE_URL
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
+      // 1. Add the explicit return type to the arrow function
+      useFactory: (configService: ConfigService): TypeOrmModuleOptions => {
         const baseConfig =
           configService.get<TypeOrmModuleOptions>('database') || {};
         const databaseUrl = configService.get<string>('DATABASE_URL');
@@ -36,8 +37,8 @@ import { ContentModule } from './modules/content/content.module';
           return {
             ...baseConfig,
             type: 'postgres',
-            url: databaseUrl, // TypeORM prioritizes 'url' over individual host/port keys
-          };
+            url: databaseUrl,
+          } as TypeOrmModuleOptions; // 2. Add this type assertion to bypass the union type mismatch
         }
 
         return baseConfig;
