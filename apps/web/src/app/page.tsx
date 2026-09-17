@@ -24,26 +24,37 @@ function extractDiscoveryData(obj: any): any {
 }
 
 export default async function HomePage() {
-  const [discoveryRes, popMangaRes, trendMangaRes] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    (apiClient as any).GET("/api/v1/discovery/home", {
-      next: { revalidate: 300 },
-    }),
-    apiClient.GET("/api/v1/media/search", {
-      params: {
-        query: { limit: 15, type: "MANGA", sort: "POPULARITY_DESC" } as any,
-      },
-      next: { revalidate: 300 },
-    }),
-    apiClient.GET("/api/v1/media/search", {
-      params: {
-        query: { limit: 15, type: "MANGA", sort: "TRENDING_DESC" } as any,
-      },
-      next: { revalidate: 300 },
-    }),
-  ]);
+  let discoveryRes: any, popMangaRes: any, trendMangaRes: any;
+
+  try {
+    [discoveryRes, popMangaRes, trendMangaRes] = await Promise.all([
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      (apiClient as any).GET("/api/v1/discovery/home", {
+        next: { revalidate: 300 },
+      }),
+      apiClient.GET("/api/v1/media/search", {
+        params: {
+          query: { limit: 15, type: "MANGA", sort: "POPULARITY_DESC" } as any,
+        },
+        next: { revalidate: 300 },
+      }),
+      apiClient.GET("/api/v1/media/search", {
+        params: {
+          query: { limit: 15, type: "MANGA", sort: "TRENDING_DESC" } as any,
+        },
+        next: { revalidate: 300 },
+      }),
+    ]);
+  } catch (error) {
+    // Gracefully catch ECONNREFUSED network errors during Vercel's build-time pre-rendering
+    console.error(
+      "Network error fetching discovery feeds during render:",
+      error,
+    );
+  }
 
   // Recursively unwrap the payloads based on the wire format
+  // Safe navigation (?.) ensures these don't throw if the responses are undefined from a caught error
   const discoveryData = extractDiscoveryData(discoveryRes?.data);
   const popMangaData = extractArray(popMangaRes?.data);
   const trendMangaData = extractArray(trendMangaRes?.data);
@@ -94,13 +105,17 @@ export default async function HomePage() {
   }
 
   const animeData = {
-    error: discoveryRes.error ? "Failed to load discovery feeds" : null,
+    // Explicitly check for undefined responses in case the try/catch trapped an exception
+    error:
+      !discoveryRes || discoveryRes.error
+        ? "Failed to load discovery feeds"
+        : null,
     categories: animeCategories,
   };
 
   const mangaData = {
     error:
-      popMangaRes.error || trendMangaRes.error
+      !popMangaRes || !trendMangaRes || popMangaRes.error || trendMangaRes.error
         ? "Failed to load manga feeds"
         : null,
     categories: [
