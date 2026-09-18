@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { MediaDiscoveryScore } from '../entities/media-discovery-score.entity';
 import { MediaEditorialOverride } from '../entities/media-editorial-override.entity';
 import { MediaDataService } from './media-data.service';
@@ -11,7 +11,10 @@ import {
   HomeDiscoveryResponseDto,
   DiscoveryFeed,
 } from '../dto/discovery.dto';
-import { MediaSeason } from '../interfaces/media-provider.interface';
+import {
+  MediaSeason,
+  MediaCandidateOptions,
+} from '../interfaces/media-provider.interface';
 
 @Injectable()
 export class DiscoveryEngineService {
@@ -67,7 +70,7 @@ export class DiscoveryEngineService {
 
   // ==========================================================================
   // THE READ PATH (Executed ONLY by the API Controller)
-  // Strictly reads from PostgreSQL. Zero AniList API calls.
+  // Strictly reads from PostgreSQL. Zero upstream API calls.
   // ==========================================================================
 
   async getHomeDiscoveryFeeds(): Promise<HomeDiscoveryResponseDto> {
@@ -78,10 +81,17 @@ export class DiscoveryEngineService {
       order: { rank: 'ASC' },
     });
 
-    const mapShelf = (feedKey: DiscoveryFeed) =>
-      cachedScores
-        .filter((s) => s.feedKey === feedKey)
-        .map((s) => this.mapToDto(s.mediaItem));
+    // O(N) single-pass grouping for optimal read-path performance
+    const groupedShelves = cachedScores.reduce(
+      (acc, score) => {
+        if (!acc[score.feedKey]) acc[score.feedKey] = [];
+        acc[score.feedKey].push(this.mapToDto(score.mediaItem));
+        return acc;
+      },
+      {} as Record<string, MediaCardDto[]>,
+    );
+
+    const mapShelf = (feedKey: DiscoveryFeed) => groupedShelves[feedKey] || [];
 
     return {
       trendingThisWeek: {
@@ -124,13 +134,31 @@ export class DiscoveryEngineService {
 
   async refreshDiscoveryScores(): Promise<void> {
     this.logger.log('Executing sequential background discovery refresh...');
+    const limit = 15;
 
-    // Run sequentially to guarantee absolutely zero PostgreSQL lock contention
-    await this.refreshTrendingThisWeek(15);
-    await this.refreshNewReleases(15);
-    await this.refreshCurrentlyAiring(15);
-    await this.refreshPopularThisSeason(15);
-    await this.refreshUpcomingReleases(15);
+    // Isolated executions: If one feed fails (e.g., rate limits), others still update
+    const tasks = [
+      { name: 'Trending', fn: () => this.refreshTrendingThisWeek(limit) },
+      { name: 'New Releases', fn: () => this.refreshNewReleases(limit) },
+      {
+        name: 'Currently Airing',
+        fn: () => this.refreshCurrentlyAiring(limit),
+      },
+      {
+        name: 'Popular This Season',
+        fn: () => this.refreshPopularThisSeason(limit),
+      },
+      { name: 'Upcoming', fn: () => this.refreshUpcomingReleases(limit) },
+    ];
+
+    for (const task of tasks) {
+      try {
+        await task.fn();
+      } catch (error) {
+        const stackTrace = error instanceof Error ? error.stack : String(error);
+        this.logger.error(`Failed to refresh ${task.name} feed:`, stackTrace);
+      }
+    }
 
     this.logger.log('Discovery cache refresh complete.');
   }
@@ -139,27 +167,60 @@ export class DiscoveryEngineService {
     feedKey: DiscoveryFeed,
     algorithmVersion: string,
     items: Partial<MediaDiscoveryScore>[],
-  ) {
-    // Purge old rankings for this feed so dropped media instantly disappears
-    await this.scoreRepo.delete({ feedKey });
+  ): Promise<void> {
+    // Wrap write in a transaction to prevent race conditions during read-path queries
+    await this.scoreRepo.manager.transaction(
+      async (transactionalManager: EntityManager) => {
+        await transactionalManager.delete(MediaDiscoveryScore, { feedKey });
 
-    const entities = items.map((item) =>
-      this.scoreRepo.create({
-        feedKey,
-        algorithmVersion,
-        ...item,
-      }),
+        const entities = items.map((item) =>
+          transactionalManager.create(MediaDiscoveryScore, {
+            feedKey,
+            algorithmVersion,
+            ...item,
+          }),
+        );
+
+        await transactionalManager.save(MediaDiscoveryScore, entities);
+      },
     );
-
-    await this.scoreRepo.save(entities);
   }
 
-  private async refreshUpcomingReleases(limit: number): Promise<void> {
-    const today = new Date();
-    const todayInt = parseInt(
-      `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}00`,
-      10,
+  // --- Helper Methods ---
+
+  private getFuzzyDateInt(date: Date, includeDay = true): number {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = includeDay ? String(date.getDate()).padStart(2, '0') : '00';
+    return parseInt(`${year}${month}${day}`, 10);
+  }
+
+  private async fetchAndSaveNativeFeed(
+    feedKey: DiscoveryFeed,
+    queryCriteria: Omit<MediaCandidateOptions, 'limit'>,
+    limit: number,
+  ): Promise<void> {
+    const candidates = await this.mediaDataService.fetchAndSyncCandidates({
+      ...queryCriteria,
+      limit,
+    });
+
+    await this.saveScores(
+      feedKey,
+      'native-v1',
+      candidates.map((media, index) => ({
+        mediaItem: media,
+        rawPopularity: media.popularity || 0,
+        finalScore: (limit - index).toString(),
+        rank: index,
+      })),
     );
+  }
+
+  // --- Feed Generators ---
+
+  private async refreshUpcomingReleases(limit: number): Promise<void> {
+    const todayInt = this.getFuzzyDateInt(new Date(), false);
 
     const candidates = await this.mediaDataService.fetchAndSyncCandidates({
       type: 'ANIME',
@@ -174,6 +235,7 @@ export class DiscoveryEngineService {
       where: { feedKey: 'UPCOMING_RELEASES' },
       relations: { mediaItem: true },
     });
+
     const overrideMap = new Map(overrides.map((o) => [o.mediaItem.id, o]));
 
     const scored = candidates.map((media) => {
@@ -205,23 +267,15 @@ export class DiscoveryEngineService {
   }
 
   private async refreshTrendingThisWeek(limit: number): Promise<void> {
-    const candidates = await this.mediaDataService.fetchAndSyncCandidates({
-      type: 'ANIME',
-      statusNot: 'NOT_YET_RELEASED',
-      isAdult: false,
-      sort: ['TRENDING_DESC'],
-      limit,
-    });
-
-    await this.saveScores(
+    await this.fetchAndSaveNativeFeed(
       'TRENDING_THIS_WEEK',
-      'native-v1',
-      candidates.map((media, index) => ({
-        mediaItem: media,
-        rawPopularity: media.popularity || 0,
-        finalScore: (limit - index).toString(),
-        rank: index,
-      })),
+      {
+        type: 'ANIME',
+        statusNot: 'NOT_YET_RELEASED',
+        isAdult: false,
+        sort: ['TRENDING_DESC'],
+      },
+      limit,
     );
   }
 
@@ -230,54 +284,32 @@ export class DiscoveryEngineService {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(today.getDate() - 30);
 
-    const todayInt = parseInt(
-      `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`,
-      10,
-    );
-    const pastInt = parseInt(
-      `${thirtyDaysAgo.getFullYear()}${String(thirtyDaysAgo.getMonth() + 1).padStart(2, '0')}${String(thirtyDaysAgo.getDate()).padStart(2, '0')}`,
-      10,
-    );
+    const todayInt = this.getFuzzyDateInt(today);
+    const pastInt = this.getFuzzyDateInt(thirtyDaysAgo);
 
-    const candidates = await this.mediaDataService.fetchAndSyncCandidates({
-      type: 'ANIME',
-      isAdult: false,
-      startDateGreater: pastInt,
-      startDateLesser: todayInt,
-      sort: ['START_DATE_DESC', 'POPULARITY_DESC'],
-      limit,
-    });
-
-    await this.saveScores(
+    await this.fetchAndSaveNativeFeed(
       'NEW_RELEASES',
-      'native-v1',
-      candidates.map((media, index) => ({
-        mediaItem: media,
-        rawPopularity: media.popularity || 0,
-        finalScore: (limit - index).toString(),
-        rank: index,
-      })),
+      {
+        type: 'ANIME',
+        isAdult: false,
+        startDateGreater: pastInt,
+        startDateLesser: todayInt,
+        sort: ['START_DATE_DESC', 'POPULARITY_DESC'],
+      },
+      limit,
     );
   }
 
   private async refreshCurrentlyAiring(limit: number): Promise<void> {
-    const candidates = await this.mediaDataService.fetchAndSyncCandidates({
-      type: 'ANIME',
-      status: 'RELEASING',
-      isAdult: false,
-      sort: ['POPULARITY_DESC'],
-      limit,
-    });
-
-    await this.saveScores(
+    await this.fetchAndSaveNativeFeed(
       'CURRENTLY_AIRING',
-      'native-v1',
-      candidates.map((media, index) => ({
-        mediaItem: media,
-        rawPopularity: media.popularity || 0,
-        finalScore: (limit - index).toString(),
-        rank: index,
-      })),
+      {
+        type: 'ANIME',
+        status: 'RELEASING',
+        isAdult: false,
+        sort: ['POPULARITY_DESC'],
+      },
+      limit,
     );
   }
 
@@ -292,24 +324,17 @@ export class DiscoveryEngineService {
 
   private async refreshPopularThisSeason(limit: number): Promise<void> {
     const { season, year } = this.getCurrentSeason();
-    const candidates = await this.mediaDataService.fetchAndSyncCandidates({
-      type: 'ANIME',
-      season,
-      seasonYear: year,
-      isAdult: false,
-      sort: ['POPULARITY_DESC'],
-      limit,
-    });
 
-    await this.saveScores(
+    await this.fetchAndSaveNativeFeed(
       'POPULAR_THIS_SEASON',
-      'native-v1',
-      candidates.map((media, index) => ({
-        mediaItem: media,
-        rawPopularity: media.popularity || 0,
-        finalScore: (limit - index).toString(),
-        rank: index,
-      })),
+      {
+        type: 'ANIME',
+        season,
+        seasonYear: year,
+        isAdult: false,
+        sort: ['POPULARITY_DESC'],
+      },
+      limit,
     );
   }
 }

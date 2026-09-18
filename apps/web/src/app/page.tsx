@@ -10,17 +10,34 @@ function extractArray(obj: any): any[] {
   if (typeof obj === "object" && "data" in obj) {
     return extractArray(obj.data);
   }
+  // Added fallback for standard paginated 'items' wrappers common in robust backend APIs
+  if (typeof obj === "object" && "items" in obj && Array.isArray(obj.items)) {
+    return obj.items;
+  }
   return [];
 }
 
 // Safely drill down to find the Discovery object containing our feeds
 function extractDiscoveryData(obj: any): any {
   if (!obj) return null;
-  if (obj.trendingThisWeek) return obj;
+
+  // Check if object contains ANY of the known category keys to prevent single-point failure
+  const hasDiscoveryKeys =
+    "trendingThisWeek" in obj ||
+    "newReleases" in obj ||
+    "currentlyAiring" in obj ||
+    "upcomingReleases" in obj ||
+    "popularThisSeason" in obj;
+
+  if (hasDiscoveryKeys) return obj;
+
+  // Drill down if it's wrapped in a 'data' envelope
   if (typeof obj === "object" && "data" in obj) {
     return extractDiscoveryData(obj.data);
   }
-  return null;
+
+  // Fallback return instead of null to allow downstream optional chaining to evaluate safely
+  return obj;
 }
 
 export default async function HomePage() {
@@ -54,7 +71,7 @@ export default async function HomePage() {
   }
 
   // Recursively unwrap the payloads based on the wire format
-  // Safe navigation (?.) ensures these don't throw if the responses are undefined from a caught error
+  // Safe navigation (?.) ensures these don't throw if the responses are undefined
   const discoveryData = extractDiscoveryData(discoveryRes?.data);
   const popMangaData = extractArray(popMangaRes?.data);
   const trendMangaData = extractArray(trendMangaRes?.data);
@@ -64,40 +81,40 @@ export default async function HomePage() {
   if (discoveryData) {
     if (discoveryData.trendingThisWeek?.items?.length) {
       animeCategories.push({
-        id: discoveryData.trendingThisWeek.key,
-        title: discoveryData.trendingThisWeek.title,
+        id: discoveryData.trendingThisWeek.key || "trending-week",
+        title: discoveryData.trendingThisWeek.title || "Trending This Week",
         href: "/search/anime?sort=TRENDING",
         items: discoveryData.trendingThisWeek.items,
       });
     }
     if (discoveryData.newReleases?.items?.length) {
       animeCategories.push({
-        id: discoveryData.newReleases.key,
-        title: discoveryData.newReleases.title,
+        id: discoveryData.newReleases.key || "new-releases",
+        title: discoveryData.newReleases.title || "New Releases",
         href: "/search/anime?status=RELEASING",
         items: discoveryData.newReleases.items,
       });
     }
     if (discoveryData.currentlyAiring?.items?.length) {
       animeCategories.push({
-        id: discoveryData.currentlyAiring.key,
-        title: discoveryData.currentlyAiring.title,
+        id: discoveryData.currentlyAiring.key || "currently-airing",
+        title: discoveryData.currentlyAiring.title || "Currently Airing",
         href: "/search/anime?status=RELEASING",
         items: discoveryData.currentlyAiring.items,
       });
     }
     if (discoveryData.upcomingReleases?.items?.length) {
       animeCategories.push({
-        id: discoveryData.upcomingReleases.key,
-        title: discoveryData.upcomingReleases.title,
+        id: discoveryData.upcomingReleases.key || "upcoming-releases",
+        title: discoveryData.upcomingReleases.title || "Upcoming Releases",
         href: "/search/anime?status=NOT_YET_RELEASED",
         items: discoveryData.upcomingReleases.items,
       });
     }
     if (discoveryData.popularThisSeason?.items?.length) {
       animeCategories.push({
-        id: discoveryData.popularThisSeason.key,
-        title: discoveryData.popularThisSeason.title,
+        id: discoveryData.popularThisSeason.key || "popular-season",
+        title: discoveryData.popularThisSeason.title || "Popular This Season",
         href: "/search/anime?season=CURRENT",
         items: discoveryData.popularThisSeason.items,
       });
@@ -131,7 +148,7 @@ export default async function HomePage() {
         href: "/search/manga?sort=POPULAR",
         items: popMangaData,
       },
-    ].filter((c) => c.items.length > 0),
+    ].filter((c) => c.items?.length > 0),
   };
 
   return (
