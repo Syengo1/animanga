@@ -10,7 +10,6 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
 async function bootstrap() {
-  // Explicitly type the app to access Express-specific underlying methods
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Trust Proxy for Railway/Cloudflare load balancers (ensures accurate IP mapping for rate limits)
@@ -18,18 +17,18 @@ async function bootstrap() {
 
   app.use(helmet());
 
-  // Strict CORS Configuration for Production & Preview Environments
-  const allowedOrigins = new Set([
-    process.env.FRONTEND_URL || 'http://localhost:3000',
+  // Strict CORS Configuration filtered safely
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
     'https://animanga.app',
     'https://www.animanga.app',
     'http://localhost:3000',
-  ]);
+  ].filter(Boolean);
 
   app.enableCors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps or curl) or matched domains
-      if (!origin || allowedOrigins.has(origin)) {
+      if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
       // Allow dynamic Vercel preview environments if explicitly enabled
@@ -39,7 +38,7 @@ async function bootstrap() {
       ) {
         return callback(null, true);
       }
-      return callback(new Error('Origin not allowed by CORS'), false);
+      return callback(new Error(`Origin ${origin} not allowed by CORS`), false);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
@@ -77,8 +76,10 @@ async function bootstrap() {
     );
   }
 
-  // Dynamic port assignment provided by the platform, explicitly bound to 0.0.0.0 for Docker containers
-  const port = Number(process.env.PORT ?? 3001);
+  // Robust port assignment. Railway injects PORT dynamically; fallback to 8080 if missing.
+  const port = parseInt(process.env.PORT || '8080', 10);
+
+  // Explicitly binding to 0.0.0.0 is mandatory for external traffic routing in Railway.
   await app.listen(port, '0.0.0.0');
 
   console.log(`🚀 Animanga Platform API running on port ${port} (api/v1)`);
