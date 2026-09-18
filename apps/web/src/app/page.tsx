@@ -154,7 +154,10 @@ export default async function HomePage() {
   return (
     <div className="flex flex-col min-h-screen">
       <VoidHero />
-      <HomeClientOrchestrator animeData={animeData} mangaData={mangaData} />
+      {/* CRITICAL FIX: Added id="trending-section" to act as the scroll target */}
+      <div id="trending-section" className="relative z-30 bg-background">
+        <HomeClientOrchestrator animeData={animeData} mangaData={mangaData} />
+      </div>
       <NewsletterCTA />
     </div>
   );

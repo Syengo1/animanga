@@ -1,21 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export default function ScrollIndicator() {
   const [status, setStatus] = useState<"idle" | "holding" | "ready">("idle");
-  const [intentProg, setIntentProg] = useState(0);
   const [activeBoundary, setActiveBoundary] = useState<
     "bottom" | "top" | "none"
   >("none");
+
+  // 1. Use a ref to manipulate the SVG directly, bypassing React render cycles for 60FPS mobile performance
+  const circleRef = useRef<SVGCircleElement>(null);
+
+  const radius = 14;
+  const circumference = 2 * Math.PI * radius;
 
   useEffect(() => {
     const handleOverscroll = (e: CustomEvent) => {
       const { intentProgress, boundary, ready } = e.detail;
 
       setActiveBoundary(boundary);
-      setIntentProg(intentProgress);
+
+      // 2. Direct DOM mutation for the progress ring
+      if (circleRef.current) {
+        const offset = circumference - intentProgress * circumference;
+        circleRef.current.style.strokeDashoffset = `${offset}`;
+
+        // CRITICAL FIX: Only apply a CSS transition when resetting to 0.
+        // Applying a transition while `useFrame` pushes 60 updates/sec causes severe stuttering.
+        circleRef.current.style.transition =
+          intentProgress === 0 ? "stroke-dashoffset 0.3s ease-out" : "none";
+      }
 
       if (boundary === "none") {
         setStatus("idle");
@@ -41,17 +56,13 @@ export default function ScrollIndicator() {
         handleOverscroll as EventListener,
       );
     };
-  }, []);
+  }, [circumference]);
 
   if (activeBoundary === "top") return null;
 
-  // Circular progress calculations
-  const radius = 14;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - intentProg * circumference;
-
   return (
-    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex flex-col items-center transition-all duration-300">
+    // Elevated Z-index to 50 to ensure it isn't masked by surrounding overlays
+    <div className="absolute bottom-20 md:bottom-8 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex flex-col items-center transition-all duration-300">
       <span
         className={cn(
           "text-xs tracking-[0.3em] uppercase mb-4 transition-all duration-300 font-bold",
@@ -66,7 +77,6 @@ export default function ScrollIndicator() {
         {status === "ready" && "CONTINUING..."}
       </span>
 
-      {/* Circular Timer Ring */}
       <div
         className="relative flex items-center justify-center transition-opacity duration-300"
         style={{ opacity: status === "idle" ? 0.3 : 1 }}
@@ -82,6 +92,7 @@ export default function ScrollIndicator() {
             className="text-white/20"
           />
           <circle
+            ref={circleRef}
             cx="20"
             cy="20"
             r={radius}
@@ -89,12 +100,11 @@ export default function ScrollIndicator() {
             strokeWidth="2"
             fill="transparent"
             strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            className="text-primary transition-all ease-linear"
-            style={{ transitionDuration: intentProg === 0 ? "0ms" : "50ms" }}
+            strokeDashoffset={circumference}
+            // Removed Tailwind's "transition-all ease-linear" to stop 60FPS CSS transition fighting
+            className="text-primary"
           />
         </svg>
-        {/* Subtle chevron indicating downward direction */}
         <div className="absolute w-2 h-2 border-b-2 border-r-2 border-current transform rotate-45 mt-[-2px] text-white/70" />
       </div>
     </div>
