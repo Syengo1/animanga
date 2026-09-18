@@ -4,6 +4,14 @@ export class InitialSchema1789710665177 implements MigrationInterface {
   name = 'InitialSchema1789710665177';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // Inject schema creation commands here
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "identity"`);
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "commerce"`);
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "content"`);
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "events"`);
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "finance"`);
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "integration"`);
+
     await queryRunner.query(
       `CREATE TABLE "identity"."users" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "email" citext NOT NULL, "password_hash" text NOT NULL, "first_name" character varying(100), "last_name" character varying(100), "phone" character varying(30), "is_active" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_a3ffb1c0c8416b9fc6f907b7433" PRIMARY KEY ("id"))`,
     );
