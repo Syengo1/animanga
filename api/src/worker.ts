@@ -11,4 +11,8 @@ async function bootstrap() {
   console.log('⚙️ Animanga Background Worker successfully started.');
 }
 
-bootstrap();
+// Safely execute the async bootstrap function and catch any fatal initialization errors
+bootstrap().catch((error) => {
+  console.error('Fatal error during background worker startup:', error);
+  process.exit(1);
+});

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { MediaDiscoveryScore } from '../entities/media-discovery-score.entity';
@@ -17,7 +17,7 @@ import {
 } from '../interfaces/media-provider.interface';
 
 @Injectable()
-export class DiscoveryEngineService {
+export class DiscoveryEngineService implements OnApplicationBootstrap {
   private readonly logger = new Logger(DiscoveryEngineService.name);
 
   constructor(
@@ -28,6 +28,37 @@ export class DiscoveryEngineService {
     @InjectRepository(MediaEditorialOverride)
     private readonly editorialRepo: Repository<MediaEditorialOverride>,
   ) {}
+
+  // ==========================================================================
+  // LIFECYCLE HOOK: Forces sync on deployment/startup
+  // ==========================================================================
+  onApplicationBootstrap(): void {
+    this.logger.log(
+      'Application bootstrap: Initiating discovery cache hydration...',
+    );
+    // We intentionally do not await this here so it doesn't block the HTTP server from binding to the port.
+    // It will run silently in the background immediately after the server starts.
+    this.refreshDiscoveryScores().catch((err: unknown) => {
+      let errorMessage = 'Unknown error occurred';
+
+      if (err instanceof Error) {
+        errorMessage = err.stack || err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else {
+        try {
+          errorMessage = JSON.stringify(err);
+        } catch {
+          errorMessage = 'Un-stringifiable error object';
+        }
+      }
+
+      this.logger.error(
+        'Failed to hydrate discovery cache during bootstrap',
+        errorMessage,
+      );
+    });
+  }
 
   private mapToDto(item: MediaItem): MediaCardDto {
     return {
@@ -128,7 +159,7 @@ export class DiscoveryEngineService {
   }
 
   // ==========================================================================
-  // THE WRITE PATH (Executed ONLY by the BullMQ Worker)
+  // THE WRITE PATH (Executed ONLY by the BullMQ Worker OR Bootstrap)
   // Fetches, synchronizes canonical facts, calculates scores, and caches results.
   // ==========================================================================
 
@@ -241,9 +272,13 @@ export class DiscoveryEngineService {
     const scored = candidates.map((media) => {
       const override = overrideMap.get(media.id);
       const multiplier = override ? parseFloat(override.multiplier) : 1.0;
+
+      // Safety check: ensure startDate exists before calculating urgency
+      const safeDate = media.startDate ? media.startDate : new Date();
+
       const scores = this.scoringService.calculateFinalUpcomingScore(
         media.popularity || 0,
-        media.startDate,
+        safeDate,
         multiplier,
       );
       return { media, ...scores };

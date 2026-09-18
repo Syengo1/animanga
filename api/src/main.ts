@@ -20,8 +20,7 @@ async function bootstrap() {
   // Strict CORS Configuration filtered safely
   const allowedOrigins = [
     process.env.FRONTEND_URL,
-    'https://animanga.app',
-    'https://www.animanga.app',
+    'https://animangaweb.vercel.app',
     'http://localhost:3000',
   ].filter(Boolean);
 

@@ -50,20 +50,21 @@ import { ContentModule } from './modules/content/content.module';
       useFactory: (configService: ConfigService) => {
         const redisUrl = configService.get<string>('REDIS_URL');
 
-        // BullMQ expects a structured connection object. We use standard URL parsing to split Railway's raw string.
         if (redisUrl) {
           const url = new URL(redisUrl);
+          const isTls = url.protocol === 'rediss:'; // Check for TLS requirement
+
           return {
             connection: {
               host: url.hostname,
               port: Number(url.port),
               username: url.username || undefined,
               password: url.password || undefined,
+              tls: isTls ? { rejectUnauthorized: false } : undefined,
             },
           };
         }
 
-        // Fallback for local development
         return {
           connection: {
             host: configService.get<string>('REDIS_HOST', 'localhost'),
