@@ -1,11 +1,19 @@
-import { useRef, useEffect, useLayoutEffect } from "react";
+import { useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { useTexture } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import gsap from "gsap";
 
 import "./GalleryShaderMaterial";
-import { CalculatedProjectData } from "@/lib/data";
+import { projectsData, CalculatedProjectData } from "@/lib/data";
+
+// 1. CRITICAL PERFORMANCE FIX: Preload all textures into the browser's cache instantly
+// when the JS bundle parses, eliminating network waterfall delays when the Canvas mounts.
+if (typeof window !== "undefined") {
+  projectsData.forEach((d) => {
+    useTexture.preload(d.image.url);
+  });
+}
 
 declare module "@react-three/fiber" {
   interface ThreeElements {
@@ -53,7 +61,6 @@ export default function GalleryImage({
 
   const { gl, size } = useThree();
 
-  // CLEANUP: Single texture load, mutating the cache directly to save VRAM
   const texture = useTexture(data.image.url) as THREE.Texture;
 
   useLayoutEffect(() => {
@@ -63,13 +70,11 @@ export default function GalleryImage({
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
 
-    if (!texture.mipmaps || texture.mipmaps.length === 0) {
-      texture.generateMipmaps = true;
-      texture.needsUpdate = true;
-    }
+    // 2. CRITICAL FIX: Removed manual `generateMipmaps` and `needsUpdate`.
+    // Three.js and useTexture already handle this automatically and asynchronously.
+    // Forcing it here caused the massive main-thread freeze.
   }, [texture, gl]);
 
-  // PHASE 1 FIX: Deterministic layout without random twists
   useLayoutEffect(() => {
     if (!meshRef.current) return;
 
@@ -80,11 +85,9 @@ export default function GalleryImage({
 
     // Store the exact intended orientation for the GSAP intro animation snap.
     originalQuat.current.copy(meshRef.current.quaternion);
+  }, [data.xPos, data.yPos, data.zPos]); // Optimized dependencies
 
-    // Math.random() rotations have been completely removed.
-  }, [data]);
-
-  // Synchronized 2.0s Entrance Animation
+  // Synchronized Entrance Animation
   useEffect(() => {
     if (!materialRef.current || !meshRef.current) return;
 
@@ -121,25 +124,25 @@ export default function GalleryImage({
     return () => ctx.revert();
   }, [data.baseOpacity, triggerIntro]);
 
+  // 3. PERFORMANCE FIX: Optimized 60FPS Render Loop
   useFrame(() => {
     if (!materialRef.current) return;
 
     const isMobile = size.width < 768;
     const targetCurveX = isMobile ? 0 : globalCurveX.current;
-
-    // TEMPORARY PHASE 1 FIX: Force tilt to 0 for debugging base layout stability
     const targetTilt = 0;
 
-    materialRef.current.uCurveAmountX = THREE.MathUtils.lerp(
-      materialRef.current.uCurveAmountX,
-      targetCurveX,
-      0.05,
-    );
-    materialRef.current.uTiltAngle = THREE.MathUtils.lerp(
-      materialRef.current.uTiltAngle,
-      targetTilt,
-      0.05,
-    );
+    // Epsilon check: Only calculate lerps and mutate uniforms if the value has actually changed.
+    // This prevents Three.js from unnecessarily pushing uniform updates to the GPU while the gallery is idle.
+    const diffX = targetCurveX - materialRef.current.uCurveAmountX;
+    if (Math.abs(diffX) > 0.0001) {
+      materialRef.current.uCurveAmountX += diffX * 0.05;
+    }
+
+    const diffTilt = targetTilt - materialRef.current.uTiltAngle;
+    if (Math.abs(diffTilt) > 0.0001) {
+      materialRef.current.uTiltAngle += diffTilt * 0.05;
+    }
   });
 
   // Interactive Hover Animation
@@ -175,6 +178,12 @@ export default function GalleryImage({
     return () => ctx.revert();
   }, [hoveredId, data.baseOpacity, data.id, triggerIntro]);
 
+  // 4. MEMORY FIX: Memoize geometry arguments so React doesn't re-evaluate array equality
+  const planeArgs = useMemo(
+    () => [data.calcWidth, data.calcHeight, 20, 20] as const,
+    [data.calcWidth, data.calcHeight],
+  );
+
   return (
     <mesh
       ref={meshRef}
@@ -189,7 +198,7 @@ export default function GalleryImage({
         setHoveredId(null);
       }}
     >
-      <planeGeometry args={[data.calcWidth, data.calcHeight, 20, 20]} />
+      <planeGeometry args={planeArgs} />
       <galleryShaderMaterial
         ref={materialRef}
         uTexture={texture}
