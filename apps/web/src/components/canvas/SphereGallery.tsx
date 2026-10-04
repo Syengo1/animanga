@@ -7,13 +7,17 @@ import CameraController from "./CameraController";
 import { projectsData, ProjectData, CalculatedProjectData } from "@/lib/data";
 
 interface SphereGalleryProps {
-  onSelectProject: (id: string | null) => void;
+  onSelectProject?: (id: string | null) => void;
   triggerIntro: boolean;
+  onReady?: () => void;
+  onIntroComplete?: () => void;
 }
 
 export default function SphereGallery({
   onSelectProject,
   triggerIntro,
+  onReady,
+  onIntroComplete,
 }: SphereGalleryProps) {
   const { get, size } = useThree();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -24,23 +28,30 @@ export default function SphereGallery({
   const velX = useRef(0);
   const velY = useRef(0);
 
+  const readySignaled = useRef(false);
+  const frameCounter = useRef(0);
+
+  // Safely trap the external callback so it doesn't trigger effect re-runs
+  const onIntroCompleteRef = useRef(onIntroComplete);
+  useEffect(() => {
+    onIntroCompleteRef.current = onIntroComplete;
+  }, [onIntroComplete]);
+
   const { layoutData, panLimitY, topBoundary, bottomBoundary, galleryRadius } =
     useMemo(() => {
       const isMobile = size.width < 768;
       let topBound = -Infinity;
       let bottomBound = Infinity;
 
-      // 1. Calculate a uniform design scale to shrink/grow the scene based on screen size
       const designScale = THREE.MathUtils.clamp(
         Math.min(size.width, size.height) / 1000,
         0.65,
         1.6,
       );
 
-      // Track the active radius so the camera knows exactly how far away the images are
       const activeRadius = isMobile ? 3000 : 2500 * designScale;
-
       let maxAspect = 1;
+
       projectsData.forEach((p) => {
         const aspect = p.image.dimensions.height / p.image.dimensions.width;
         if (aspect > maxAspect) maxAspect = aspect;
@@ -51,10 +62,6 @@ export default function SphereGallery({
           let calcWidth, calcHeight, xPos, yPos, zPos;
 
           if (!isMobile) {
-            // ==========================================
-            // DESKTOP: Preserve Original Art Direction
-            // ==========================================
-            // Do NOT scale the reference walls. Keep them canonical to data.ts.
             const t = 5760;
             const r = 3100;
             const populatedAngle = 270;
@@ -85,16 +92,12 @@ export default function SphereGallery({
               horizontalPosition * populatedAngle * (Math.PI / 180) -
               halfPopulateAngleRad;
 
-            // Apply the responsive scale EXCLUSIVELY to the final world coordinates
             calcWidth = baseCalcWidth * designScale;
             calcHeight = baseCalcHeight * designScale;
             xPos = radius * Math.cos(angle) * designScale;
             zPos = radius * Math.sin(angle) * designScale;
             yPos = (0.5 - verticalPosition) * cylinderHeight * designScale;
           } else {
-            // ==========================================
-            // MOBILE: Collision-Aware Cylindrical Grid
-            // ==========================================
             const radius = activeRadius;
             const baseWidth = 900;
             const gap = 180;
@@ -165,12 +168,16 @@ export default function SphereGallery({
         z: 0,
         duration: 2.0,
         ease: "power3.out",
-        onComplete: () => setIsDiveComplete(true),
+        onComplete: () => {
+          setIsDiveComplete(true);
+          // Safely call the ref so it doesn't trigger the dependency array
+          if (onIntroCompleteRef.current) onIntroCompleteRef.current();
+        },
       });
     });
 
     return () => ctx.revert();
-  }, [get, triggerIntro]);
+  }, [get, triggerIntro]); // <-- FIX: Removed onIntroComplete to stop double-firing
 
   useEffect(() => {
     let initialized = false;
@@ -216,6 +223,14 @@ export default function SphereGallery({
   }, []);
 
   useFrame(() => {
+    if (!readySignaled.current && onReady) {
+      frameCounter.current += 1;
+      if (frameCounter.current >= 3) {
+        readySignaled.current = true;
+        onReady();
+      }
+    }
+
     globalCurveX.current = THREE.MathUtils.clamp(
       THREE.MathUtils.lerp(0, 0.2, Math.abs(velX.current) / 500),
       0,
@@ -229,12 +244,13 @@ export default function SphereGallery({
   });
 
   useEffect(() => {
-    onSelectProject(hoveredId);
+    if (onSelectProject && hoveredId) {
+      onSelectProject(hoveredId);
+    }
   }, [hoveredId, onSelectProject]);
 
   return (
     <group>
-      {/* Passing the newly calculated, synchronized galleryRadius */}
       <CameraController
         introCompleted={isDiveComplete}
         topBoundary={topBoundary}
