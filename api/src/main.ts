@@ -2,10 +2,11 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import cookieParser = require('cookie-parser');
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
-
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
@@ -16,6 +17,7 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   app.use(helmet());
+  app.use(cookieParser()); // Fully type-safe, zero ESLint warnings
 
   // Strict CORS Configuration filtered safely
   const allowedOrigins = [
@@ -40,7 +42,7 @@ async function bootstrap() {
       return callback(new Error(`Origin ${origin} not allowed by CORS`), false);
     },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
+    credentials: true, // Mandatory: Allows cookies to pass across trusted origins
     exposedHeaders: ['x-request-id'],
   });
 
@@ -81,8 +83,8 @@ async function bootstrap() {
   // Explicitly binding to 0.0.0.0 is mandatory for external traffic routing in Railway.
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 Animanga Platform API running on port ${port} (api/v1)`);
-  console.log(`📖 OpenAPI docs available at http://localhost:${port}/docs`);
+  console.log(`  Animanga Platform API running on port ${port} (api/v1)`);
+  console.log(`  OpenAPI docs available at http://localhost:${port}/docs`);
 }
 
 bootstrap().catch((err) => {

@@ -10,6 +10,8 @@ import {
 } from '../interfaces/media-provider.interface';
 import { AniListAdapter } from '../adapters/anilist.adapter';
 import { MediaItem } from '../entities/media-item.entity';
+import { MediaCardDto } from '../dto/discovery.dto';
+import { CatalogQueryDto, CatalogPageResponse } from '../dto/catalog.dto';
 
 @Injectable()
 export class MediaDataService {
@@ -74,6 +76,8 @@ export class MediaDataService {
         isAdult: media.isAdult,
         sourceUpdatedAt: media.sourceUpdatedAt,
         lastSyncedAt: new Date(),
+        nextAiringAt: media.nextAiringAt,
+        nextAiringEpisode: media.nextAiringEpisode,
       }),
     );
 
@@ -143,5 +147,130 @@ export class MediaDataService {
     options: MediaTrendOptions,
   ): Promise<CanonicalMediaTrend[]> {
     return this.primaryProvider.getMediaTrends(options);
+  }
+
+  /**
+   * 5. Catalog Engine (Offset/Page Pagination)
+   * High-performance deterministic read path for the frontend numbered pagination grids.
+   */
+  async getCatalogPage(query: CatalogQueryDto): Promise<CatalogPageResponse> {
+    // FIX: Destructure 'page' and 'season' instead of 'cursor'
+    const { type, sort, status, season, format, genre, search, limit, page } =
+      query;
+    const qb = this.mediaRepo.createQueryBuilder('media');
+
+    // 1. Base Constraints
+    qb.where('media.mediaType = :type', { type });
+    qb.andWhere('media.isAdult = false');
+
+    // 2. Exact Filters
+    if (status) qb.andWhere('media.status = :status', { status });
+    if (format) qb.andWhere('media.format = :format', { format });
+    if (genre) qb.andWhere(':genre = ANY(media.genres)', { genre });
+    if (search) {
+      qb.andWhere(
+        '(media.titleEnglish ILIKE :search OR media.titleRomaji ILIKE :search OR media.titleNative ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    // 3. Dynamic Seasonal Filters
+    if (season === 'CURRENT') {
+      const current = this.getCurrentSeason();
+      qb.andWhere('media.season = :season', { season: current.season });
+      qb.andWhere('media.seasonYear = :year', { year: current.year });
+    } else if (season) {
+      qb.andWhere('media.season = :season', { season });
+    }
+
+    // 4. Deterministic Sorting (id ASC acts as the absolute tie-breaker)
+    // FIX: Removed all cursor logic
+    switch (sort) {
+      case 'SCORE_DESC':
+        qb.orderBy('media.averageScore', 'DESC', 'NULLS LAST').addOrderBy(
+          'media.id',
+          'ASC',
+        );
+        break;
+
+      case 'START_DATE_DESC':
+        qb.orderBy('media.startDate', 'DESC', 'NULLS LAST').addOrderBy(
+          'media.id',
+          'ASC',
+        );
+        break;
+
+      case 'POPULARITY_DESC':
+      case 'TRENDING_DESC':
+      default:
+        qb.orderBy('media.popularity', 'DESC', 'NULLS LAST').addOrderBy(
+          'media.id',
+          'ASC',
+        );
+        break;
+    }
+
+    // 5. Offset/Limit Pagination
+    const skip = (page - 1) * limit;
+    qb.skip(skip).take(limit);
+
+    // 6. Execute & Count
+    const [rawRecords, totalItems] = await qb.getManyAndCount();
+
+    // Calculate total pages safely (ensuring at least 1 page exists)
+    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+
+    // 7. Return matching DTO
+    return {
+      items: rawRecords.map((item) => this.mapToDto(item)),
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems,
+        limit,
+      },
+    };
+  }
+
+  // Utility to determine the active Anime season
+  private getCurrentSeason(): { season: string; year: number } {
+    const month = new Date().getMonth();
+    const year = new Date().getFullYear();
+
+    if (month >= 0 && month <= 2) return { season: 'WINTER', year };
+    if (month >= 3 && month <= 5) return { season: 'SPRING', year };
+    if (month >= 6 && month <= 8) return { season: 'SUMMER', year };
+    return { season: 'FALL', year };
+  }
+
+  private mapToDto(item: MediaItem): MediaCardDto {
+    return {
+      id: item.id,
+      providerId: item.externalId,
+      provider: item.provider,
+      title: {
+        english: item.titleEnglish ?? null,
+        romaji: item.titleRomaji ?? null,
+        native: item.titleNative ?? null,
+      },
+      coverImage: {
+        extraLarge: item.coverImageUrl ?? null,
+        large: item.coverImageUrl ?? null,
+        color: item.colorHex ?? null,
+      },
+      bannerImage: item.bannerImageUrl ?? null,
+      colorHex: item.colorHex ?? null,
+      status: item.status ?? null,
+      format: item.format ?? null,
+      episodes: item.episodes ?? null,
+      chapters: item.chapters ?? null,
+      volumes: item.volumes ?? null,
+      season: item.season ?? null,
+      seasonYear: item.seasonYear ?? null,
+      averageScore: item.averageScore ? Number(item.averageScore) : null,
+      popularity: item.popularity ?? null,
+      startDate: item.startDate?.toISOString() ?? null,
+      endDate: item.endDate?.toISOString() ?? null,
+    };
   }
 }

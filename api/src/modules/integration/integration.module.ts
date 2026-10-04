@@ -19,9 +19,11 @@ import { OutboxService } from './services/outbox.service';
 import { ReconciliationService } from './services/reconciliation.service';
 import { MpesaService } from './services/mpesa.service';
 import { PaymentProcessingService } from './services/payment-processing.service';
+import { EmailService } from './services/email.service'; // <-- ADDED
 
 import { WebhookController } from './controllers/webhook.controller';
 import { DarajaAdapter } from './adapters/daraja.adapter';
+import { EmailProcessor } from './processors/email.processor'; // <-- ADDED
 
 @Module({
   imports: [
@@ -35,8 +37,12 @@ import { DarajaAdapter } from './adapters/daraja.adapter';
       ReconciliationCase,
       ReconciliationMatch,
     ]),
-    // FIX: Register both queues here so the OutboxService can inject them
-    BullModule.registerQueue({ name: 'payments' }, { name: 'ticket-delivery' }),
+    // FIX: Register ALL queues here so the Central OutboxService can inject them
+    BullModule.registerQueue(
+      { name: 'payments' },
+      { name: 'ticket-delivery' },
+      { name: 'email-queue' }, // <-- ADDED
+    ),
     FinanceModule,
     EventsModule,
   ],
@@ -48,6 +54,8 @@ import { DarajaAdapter } from './adapters/daraja.adapter';
     MpesaService,
     DarajaAdapter,
     PaymentProcessingService,
+    EmailService, // <-- ADDED
+    EmailProcessor, // <-- ADDED
   ],
   exports: [
     WebhookService,
@@ -55,6 +63,7 @@ import { DarajaAdapter } from './adapters/daraja.adapter';
     ReconciliationService,
     MpesaService,
     PaymentProcessingService,
+    EmailService,
   ],
 })
 export class IntegrationModule {}

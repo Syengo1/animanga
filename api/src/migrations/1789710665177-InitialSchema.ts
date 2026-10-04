@@ -5,6 +5,8 @@ export class InitialSchema1789710665177 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Inject schema creation commands here
+    await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
+    await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "citext"`);
     await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "identity"`);
     await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "commerce"`);
     await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "content"`);

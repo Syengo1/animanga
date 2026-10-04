@@ -24,6 +24,18 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+
+  // 3. API PROXY FIX: Offloads the reverse proxy from the Edge middleware to Node.js.
+  // This securely catches all frontend fetch("/api/v1/...") calls and pipes them
+  // straight to your NestJS backend on port 3001, completely preserving POST bodies.
+  async rewrites() {
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}/api/v1/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

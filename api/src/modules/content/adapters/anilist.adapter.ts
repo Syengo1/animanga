@@ -54,6 +54,14 @@ const AniListMediaSchema = z
     popularity: z.number().nullable().optional(),
     isAdult: z.boolean().nullable().optional(),
     updatedAt: z.number().nullable().optional(),
+    // NEW: Strictly typed airing schedule from AniList
+    nextAiringEpisode: z
+      .object({
+        airingAt: z.number(),
+        episode: z.number(),
+      })
+      .nullable()
+      .optional(),
   })
   .passthrough(); // Allows unexpected extra fields without failing
 
@@ -220,8 +228,13 @@ export class AniListAdapter implements MediaProvider {
       sourceUpdatedAt: media.updatedAt
         ? new Date(media.updatedAt * 1000)
         : undefined,
-    };
-  }
+      // FIX: Ensure this is correctly inside the return object
+      nextAiringAt: media.nextAiringEpisode?.airingAt
+        ? new Date(media.nextAiringEpisode.airingAt * 1000)
+        : undefined,
+      nextAiringEpisode: media.nextAiringEpisode?.episode || undefined,
+    }; // <-- FIX: Closed the return object properly
+  } // <-- FIX: Closed the function properly
 
   // --- Provider Contract Implementation ---
 
@@ -261,6 +274,7 @@ export class AniListAdapter implements MediaProvider {
             startDate { year month day } endDate { year month day }
             coverImage { extraLarge color } bannerImage
             episodes chapters volumes genres averageScore popularity isAdult updatedAt
+            nextAiringEpisode { airingAt episode }
           }
         }
       }
@@ -355,6 +369,7 @@ export class AniListAdapter implements MediaProvider {
             startDate { year month day } endDate { year month day }
             coverImage { extraLarge color } bannerImage
             episodes chapters volumes genres averageScore popularity isAdult updatedAt
+            nextAiringEpisode { airingAt episode }
           }
         }
       }

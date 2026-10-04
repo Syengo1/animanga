@@ -11,7 +11,11 @@ export default registerAs(
     password: process.env.DB_PASSWORD || 'secure_password_here',
     database: process.env.DB_NAME || 'animanga_ledger',
     autoLoadEntities: true,
-    synchronize: false,
+
+    // FIX: Force TypeORM to instantly build the database from your TypeScript entities
+    synchronize: true,
+    migrationsRun: false,
+
     logging: ['warn', 'error'],
     maxQueryExecutionTime: 1000,
   }),

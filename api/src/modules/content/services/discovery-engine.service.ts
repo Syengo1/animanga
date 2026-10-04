@@ -326,6 +326,7 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       'NEW_RELEASES',
       {
         type: 'ANIME',
+        status: 'RELEASING', // STRICT DETERMINISM: Must be currently airing
         isAdult: false,
         startDateGreater: pastInt,
         startDateLesser: todayInt,
@@ -367,6 +368,7 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
         season,
         seasonYear: year,
         isAdult: false,
+        statusNot: 'NOT_YET_RELEASED', // <-- FIX: Strictly filters out unreleased seasonal hype
         sort: ['POPULARITY_DESC'],
       },
       limit,

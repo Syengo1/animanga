@@ -10,12 +10,11 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { OutboxStatus } from '../enums/integration.enums';
 
-// Strictly type the raw PostgreSQL result to eliminate 'any'
 interface RawOutboxMessage {
   id: string;
   aggregate_id: string;
-  event_type: string; // <-- Added to allow routing
-  deduplication_key: string; // <-- Added for BullMQ jobId mapping
+  event_type: string;
+  deduplication_key: string;
   payload: Record<string, unknown>;
   attempt_count: number;
 }
@@ -32,11 +31,11 @@ export class OutboxService
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectQueue('payments') private readonly paymentsQueue: Queue,
-    @InjectQueue('ticket-delivery') private readonly deliveryQueue: Queue, // <-- Added centralized routing queue
+    @InjectQueue('ticket-delivery') private readonly deliveryQueue: Queue,
+    @InjectQueue('email-queue') private readonly emailQueue: Queue, // <-- NEW
   ) {}
 
   onApplicationBootstrap() {
-    // Polling is configured here. Set OUTBOX_DISPATCHER_ENABLED=false in tests if needed.
     const isEnabled = process.env.OUTBOX_DISPATCHER_ENABLED !== 'false';
     if (isEnabled) {
       this.timer = setInterval(() => void this.dispatchOutboxMessages(), 2000);
@@ -62,7 +61,6 @@ export class OutboxService
     try {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
-
       let messages: RawOutboxMessage[] = [];
 
       await queryRunner.startTransaction();
@@ -121,10 +119,28 @@ export class OutboxService
                 orderId: msg.payload.orderId,
               },
               {
-                jobId: msg.deduplication_key.replace(/:/g, '-'), // BullMQ rejects colons
+                jobId: msg.deduplication_key.replace(/:/g, '-'),
                 removeOnComplete: true,
                 attempts: 3,
                 backoff: { type: 'exponential', delay: 5000 },
+              },
+            );
+          } else if (
+            msg.event_type === 'USER_REGISTERED' ||
+            msg.event_type === 'USER_ACTIVATED'
+          ) {
+            // <-- NEW: Route Identity Events to the Email Queue
+            await this.emailQueue.add(
+              msg.event_type,
+              {
+                eventType: msg.event_type,
+                payload: msg.payload,
+                deduplicationKey: msg.deduplication_key,
+              },
+              {
+                jobId: msg.deduplication_key.replace(/:/g, '-'),
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 2000 },
               },
             );
           } else {

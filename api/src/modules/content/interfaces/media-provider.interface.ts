@@ -38,6 +38,8 @@ export interface CanonicalMedia {
   popularity?: number;
   isAdult?: boolean;
   sourceUpdatedAt?: Date;
+  nextAiringAt?: Date;
+  nextAiringEpisode?: number;
 }
 
 export interface CanonicalMediaTrend {

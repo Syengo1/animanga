@@ -154,6 +154,12 @@ export class MediaItem {
   })
   providerMetadata?: Record<string, unknown>;
 
+  @Column({ name: 'next_airing_at', type: 'timestamptz', nullable: true })
+  nextAiringAt?: Date;
+
+  @Column({ name: 'next_airing_episode', type: 'integer', nullable: true })
+  nextAiringEpisode?: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

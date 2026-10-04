@@ -3,7 +3,9 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  ManyToMany,
 } from 'typeorm';
+import { Role } from './role.entity';
 
 @Entity({ schema: 'identity', name: 'permissions' })
 export class Permission {
@@ -18,6 +20,10 @@ export class Permission {
 
   @Column({ type: 'text', nullable: true })
   description?: string;
+
+  // NEW: Inverse relation mapping back to the Role entity
+  @ManyToMany(() => Role, (role) => role.permissions)
+  roles!: Role[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

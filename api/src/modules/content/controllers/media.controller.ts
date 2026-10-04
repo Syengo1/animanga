@@ -8,6 +8,8 @@ import {
 import { MediaDataService } from '../services/media-data.service';
 import { MediaType } from '../interfaces/media-provider.interface';
 import { MediaItem } from '../entities/media-item.entity';
+import { CatalogQuerySchema, CatalogQueryDto } from '../dto/catalog.dto';
+import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 
 @Controller('media')
 export class MediaController {
@@ -45,11 +47,21 @@ export class MediaController {
     };
   }
 
+  // NEW: The Authoritative Keyset Pagination Endpoint
+  @Get('catalog')
+  async getCatalog(
+    @Query(new ZodValidationPipe(CatalogQuerySchema)) query: CatalogQueryDto,
+  ) {
+    // FIX: Return the raw data directly.
+    // The TransformInterceptor will automatically wrap it in { success: true, data: ... }
+    return this.mediaDataService.getCatalogPage(query);
+  }
+
   @Get('search')
   async search(
     @Query('query') query?: string,
     @Query('type') type?: MediaType,
-    @Query('sort') sort?: string, // <--- Fixed: Added missing sort extraction
+    @Query('sort') sort?: string,
     @Query('limit') limit = 15,
   ) {
     const results = await this.mediaDataService.fetchAndSyncCandidates({

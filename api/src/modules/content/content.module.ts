@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bullmq';
 
 import { MediaItem } from './entities/media-item.entity';
 import { MediaTrendSnapshot } from './entities/media-trend-snapshot.entity';
@@ -10,12 +11,12 @@ import { AniListAdapter } from './adapters/anilist.adapter';
 import { MediaDataService } from './services/media-data.service';
 import { DiscoveryScoringService } from './services/discovery-scoring.service';
 import { DiscoveryEngineService } from './services/discovery-engine.service';
+import { ContentBootstrapService } from './services/content-bootstrap.service';
 
 import { MediaController } from './controllers/media.controller';
 import { DiscoveryController } from './controllers/discovery.controller';
 
-// 1. Import the new processor
-import { DiscoveryProcessor } from './processors/discovery.processor';
+import { ContentSyncWorker } from './workers/content-sync.worker';
 
 @Module({
   imports: [
@@ -25,18 +26,17 @@ import { DiscoveryProcessor } from './processors/discovery.processor';
       MediaDiscoveryScore,
       MediaEditorialOverride,
     ]),
+    BullModule.registerQueue({ name: 'content-sync' }),
   ],
-
   controllers: [MediaController, DiscoveryController],
-
   providers: [
     AniListAdapter,
     MediaDataService,
     DiscoveryScoringService,
     DiscoveryEngineService,
-    DiscoveryProcessor, // 2. Add it to providers
+    ContentBootstrapService,
+    ContentSyncWorker,
   ],
-
   exports: [MediaDataService, DiscoveryEngineService],
 })
 export class ContentModule {}

@@ -12,6 +12,7 @@
     "@animanga/api-client": "workspace:^",
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.9.1",
+    "@react-oauth/google": "^0.13.5",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
     "@tanstack/react-query": "^5.102.8",
