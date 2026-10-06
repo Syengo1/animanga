@@ -8,10 +8,11 @@ import {
   MediaTrendOptions,
   CanonicalMediaTrend,
 } from '../interfaces/media-provider.interface';
-import { AniListAdapter } from '../adapters/anilist.adapter';
+import { AniListAdapter } from '../adapters/anilist/anilist.adapter';
 import { MediaItem } from '../entities/media-item.entity';
 import { MediaCardDto } from '../dto/discovery.dto';
 import { CatalogQueryDto, CatalogPageResponse } from '../dto/catalog.dto';
+import { MediaDetailDto } from '../dto/media-detail.dto';
 
 @Injectable()
 export class MediaDataService {
@@ -154,7 +155,6 @@ export class MediaDataService {
    * High-performance deterministic read path for the frontend numbered pagination grids.
    */
   async getCatalogPage(query: CatalogQueryDto): Promise<CatalogPageResponse> {
-    // FIX: Destructure 'page' and 'season' instead of 'cursor'
     const { type, sort, status, season, format, genre, search, limit, page } =
       query;
     const qb = this.mediaRepo.createQueryBuilder('media');
@@ -184,7 +184,6 @@ export class MediaDataService {
     }
 
     // 4. Deterministic Sorting (id ASC acts as the absolute tie-breaker)
-    // FIX: Removed all cursor logic
     switch (sort) {
       case 'SCORE_DESC':
         qb.orderBy('media.averageScore', 'DESC', 'NULLS LAST').addOrderBy(
@@ -230,6 +229,44 @@ export class MediaDataService {
         limit,
       },
     };
+  }
+
+  /**
+   * 6. Deep Detail Fetch (Media Detail Page)
+   * Looks up the internal UUID, gets the AniList ID, and fetches the deep graph.
+   */
+  async getMediaDetailsDeep(
+    internalId: string,
+  ): Promise<MediaDetailDto | null> {
+    // Check if the provided ID is a valid UUID pattern
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        internalId,
+      );
+
+    // Build the query securely
+    const qb = this.mediaRepo
+      .createQueryBuilder('media')
+      .where('media.provider = :provider', {
+        provider: this.primaryProvider.providerName,
+      });
+
+    if (isUuid) {
+      qb.andWhere('media.id = :id', { id: internalId });
+    } else {
+      qb.andWhere('media.externalId = :id', { id: internalId });
+    }
+
+    const media = await qb.getOne();
+
+    if (!media) {
+      return null;
+    }
+
+    return this.primaryProvider.getMediaDetailsDeep(
+      Number(media.externalId),
+      media.id,
+    );
   }
 
   // Utility to determine the active Anime season

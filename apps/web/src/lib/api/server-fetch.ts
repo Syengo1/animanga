@@ -1,11 +1,13 @@
+// C:\Projects\animanga-platform\apps\web\src\lib\api\server-fetch.ts
+
 import "server-only";
 import { cookies } from "next/headers";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/session";
 
-// Fallback ensures your Railway instance is the default target
+// Global IPv4 Override: Forces Node.js to use 127.0.0.1 instead of hanging on IPv6 (::1) localhost
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://api-production-6b8b.up.railway.app";
+  process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
+  "http://127.0.0.1:3001";
 
 /**
  * Custom Error class to handle API failures gracefully in Server Components

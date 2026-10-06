@@ -30,7 +30,8 @@ export function CatalogGrid({
       queryKey,
       queryFn: async ({ pageParam }) => {
         const baseUrl =
-          process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+          process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
+          "http://127.0.0.1:3001";
 
         const sp = new URLSearchParams({
           type: mediaType,

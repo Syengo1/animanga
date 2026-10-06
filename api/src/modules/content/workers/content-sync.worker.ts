@@ -6,7 +6,7 @@ import { Repository } from 'typeorm';
 import { MediaItem } from '../entities/media-item.entity';
 import { MediaDataService } from '../services/media-data.service';
 import { DiscoveryEngineService } from '../services/discovery-engine.service';
-import { AniListAdapter } from '../adapters/anilist.adapter';
+import { AniListAdapter } from '../adapters/anilist/anilist.adapter';
 
 @Processor('content-sync', { concurrency: 1 })
 export class ContentSyncWorker extends WorkerHost {

@@ -83,7 +83,8 @@ function LoginForm() {
       // FIX: Bypass the Next.js rewrite proxy and hit the backend directly.
       // This ensures the Set-Cookie header reaches the browser intact.
       const baseUrl =
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+        process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
+        "http://127.0.0.1:3001";
 
       const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
         method: "POST",
@@ -142,7 +143,8 @@ function LoginForm() {
 
       try {
         const baseUrl =
-          process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+          process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
+          "http://127.0.0.1:3001";
         const res = await fetch(`${baseUrl}/api/v1/auth/google`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

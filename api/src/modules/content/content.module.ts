@@ -7,7 +7,7 @@ import { MediaTrendSnapshot } from './entities/media-trend-snapshot.entity';
 import { MediaDiscoveryScore } from './entities/media-discovery-score.entity';
 import { MediaEditorialOverride } from './entities/media-editorial-override.entity';
 
-import { AniListAdapter } from './adapters/anilist.adapter';
+import { AniListAdapter } from './adapters/anilist/anilist.adapter';
 import { MediaDataService } from './services/media-data.service';
 import { DiscoveryScoringService } from './services/discovery-scoring.service';
 import { DiscoveryEngineService } from './services/discovery-engine.service';

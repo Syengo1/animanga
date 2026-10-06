@@ -1,10 +1,10 @@
 "use client";
-
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, Plus, Star, ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Info, Plus, Star, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const TABS = ["ANIME", "MANGA", "EVENTS"] as const;
@@ -23,14 +23,12 @@ export function LiquidMediaPlayer({
 }: LiquidMediaPlayerProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
   const activeItem = items?.[activeIndex];
 
   useEffect(() => {
     setActiveIndex(0);
-    if (scrollContainerRef.current) {
+    if (scrollContainerRef.current)
       scrollContainerRef.current.scrollTo({ left: 0, behavior: "smooth" });
-    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -88,10 +86,7 @@ export function LiquidMediaPlayer({
     activeItem.title?.romaji ??
     activeItem.title?.native ??
     "Unknown";
-
   const accentColor = activeItem.colorHex || "var(--primary)";
-
-  // Favor banner, fallback to cover
   const heroImgUrl =
     activeItem.bannerImage ??
     activeItem.coverImage?.extraLarge ??
@@ -139,7 +134,7 @@ export function LiquidMediaPlayer({
             <div className="relative w-full aspect-video md:aspect-[21/9] lg:aspect-[2.35/1] rounded-2xl md:rounded-[2rem] bg-black border border-white/10 overflow-hidden shadow-2xl group">
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={activeItem.id} // Replaced activeItem.externalId
+                  key={activeItem.id}
                   initial={{ opacity: 0, scale: 1.02 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0 }}
@@ -155,10 +150,8 @@ export function LiquidMediaPlayer({
                       priority
                     />
                   )}
-
                   <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
                   <div className="absolute inset-0 bg-gradient-to-r from-background via-background/60 to-transparent w-3/4" />
-
                   <div className="absolute bottom-0 left-0 p-6 md:p-10 lg:p-14 w-full md:w-3/4 lg:w-2/3 flex flex-col items-start justify-end h-full">
                     <div
                       className="w-12 h-1 rounded-full mb-4 shadow-[0_0_10px_currentColor]"
@@ -176,9 +169,15 @@ export function LiquidMediaPlayer({
                         : "No description available."}
                     </p>
                     <div className="flex items-center gap-3">
-                      <Button className="bg-white hover:bg-white/90 text-black h-12 md:h-14 px-8 md:px-10 rounded-xl font-bold text-base transition-transform hover:scale-105">
-                        <Play className="w-5 h-5 mr-2 fill-current" /> Play
-                      </Button>
+                      <Link
+                        href={`/${activeTab.toLowerCase()}/${activeItem.id}`} // FIX: Use Internal UUID
+                        className={cn(
+                          buttonVariants({ variant: "default" }),
+                          "bg-white hover:bg-white/90 text-black h-12 md:h-14 px-8 md:px-10 rounded-xl font-bold text-base transition-transform hover:scale-105",
+                        )}
+                      >
+                        <Info className="w-5 h-5 mr-2" /> More Info
+                      </Link>
                       <Button
                         variant="ghost"
                         className="bg-white/10 hover:bg-white/20 border border-white/20 text-white h-12 md:h-14 w-12 md:w-14 rounded-xl backdrop-blur-md transition-transform hover:scale-105 p-0"
@@ -218,29 +217,24 @@ export function LiquidMediaPlayer({
               </Button>
             </div>
           </div>
-
           <div
             ref={scrollContainerRef}
             className="flex gap-4 overflow-x-auto snap-x snap-mandatory no-scrollbar pb-6 pt-2 -mx-4 px-4 md:mx-0 md:px-0"
           >
             {items.map((item, idx) => {
               const isSelected = activeIndex === idx;
-              // 1. Safely derive thumbnail title
               const itemTitle =
                 item.title?.english ??
                 item.title?.romaji ??
                 item.title?.native ??
                 "Unknown";
-
-              // 2. Safely derive thumbnail image
               const thumbImgUrl =
                 item.coverImage?.extraLarge ??
                 item.coverImage?.large ??
                 "/placeholder.jpg";
-
               return (
                 <div
-                  key={item.id} // Replaced item.externalId
+                  key={item.id}
                   onClick={() => setActiveIndex(idx)}
                   className={cn(
                     "relative aspect-video w-[240px] md:w-[280px] lg:w-[320px] shrink-0 snap-start rounded-xl overflow-hidden cursor-pointer border transition-all duration-300",
@@ -258,14 +252,12 @@ export function LiquidMediaPlayer({
                       sizes="(max-width: 768px) 240px, 320px"
                     />
                   )}
-
                   {item.averageScore && (
                     <div className="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-1.5 py-0.5 rounded flex items-center gap-1 text-[10px] md:text-xs font-bold border border-white/10">
                       <Star className="w-3 h-3 text-yellow-500 fill-current" />
                       {(item.averageScore / 10).toFixed(1)}
                     </div>
                   )}
-
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-4 opacity-100 transition-opacity duration-300">
                     <span className="text-sm font-bold text-white line-clamp-1 drop-shadow-md">
                       {itemTitle}

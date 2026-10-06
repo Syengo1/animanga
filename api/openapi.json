@@ -670,8 +670,9 @@
             "description": ""
           }
         },
+        "summary": "Paginated media catalog",
         "tags": [
-          "Media"
+          "Content - Media"
         ]
       }
     },
@@ -709,8 +710,36 @@
             "description": ""
           }
         },
+        "summary": "Search media candidates",
         "tags": [
-          "Media"
+          "Content - Media"
+        ]
+      }
+    },
+    "/api/v1/media/{id}/details": {
+      "get": {
+        "operationId": "MediaController_getMediaDetailsDeep",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comprehensive media details including cast and relations."
+          },
+          "404": {
+            "description": "Media not found."
+          }
+        },
+        "summary": "Retrieve deep media details by internal UUID or Provider ID",
+        "tags": [
+          "Content - Media"
         ]
       }
     },
@@ -748,8 +777,9 @@
             "description": ""
           }
         },
+        "summary": "Lookup media by upstream provider ID",
         "tags": [
-          "Media"
+          "Content - Media"
         ]
       }
     },

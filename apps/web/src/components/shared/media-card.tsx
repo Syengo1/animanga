@@ -3,7 +3,6 @@ import Link from "next/link";
 import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// 1. Restored the exported interface for catalog-query.ts
 export interface MediaCardData {
   id: string;
   providerId: string;
@@ -26,8 +25,8 @@ export interface MediaCardData {
 
 interface MediaCardProps {
   media: MediaCardData | any;
-  type?: "anime" | "manga"; // Legacy prop for catalog-grid.tsx
-  mediaType?: "anime" | "manga"; // New prop for SSR category pages
+  type?: "anime" | "manga";
+  mediaType?: "anime" | "manga";
   priority?: boolean;
   className?: string;
 }
@@ -39,25 +38,21 @@ export function MediaCard({
   priority = false,
   className,
 }: MediaCardProps) {
-  // 2. Safely resolve the media type regardless of which component called it
   const activeType = mediaType || type || "anime";
-
   const title =
     media.title?.english ||
     media.title?.romaji ||
     media.title?.native ||
     "Unknown";
-
   const coverUrl =
     media.coverImage?.extraLarge ||
     media.coverImage?.large ||
     "/placeholder.jpg";
-
   const dominantColor = media.colorHex || "var(--primary)";
 
   return (
     <Link
-      href={`/${activeType}/${media.providerId}`}
+      href={`/${activeType}/${media.id}`} // FIX: Link to the canonical Animanga UUID
       prefetch={false}
       className={cn(
         "flex flex-col gap-3 group cursor-pointer w-full",

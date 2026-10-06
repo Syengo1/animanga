@@ -4,7 +4,8 @@ import * as THREE from "three";
 import gsap from "gsap";
 import GalleryImage from "./GalleryImage";
 import CameraController from "./CameraController";
-import { projectsData, ProjectData, CalculatedProjectData } from "@/lib/data";
+import { projectsData } from "@/lib/data";
+import type { ProjectData, CalculatedProjectData } from "@/lib/data";
 
 interface SphereGalleryProps {
   onSelectProject?: (id: string | null) => void;
@@ -25,20 +26,26 @@ export default function SphereGallery({
 
   const globalCurveX = useRef(0);
   const globalTiltAngle = useRef(0);
-  const velX = useRef(0);
-  const velY = useRef(0);
+
+  // Track raw velocity for smoothing
+  const rawVelX = useRef(0);
+  const rawVelY = useRef(0);
+  const smoothVelX = useRef(0);
+  const smoothVelY = useRef(0);
 
   const readySignaled = useRef(false);
   const frameCounter = useRef(0);
+  const introStarted = useRef(false); // One-shot guard
 
-  // Safely trap the external callback so it doesn't trigger effect re-runs
   const onIntroCompleteRef = useRef(onIntroComplete);
   useEffect(() => {
     onIntroCompleteRef.current = onIntroComplete;
   }, [onIntroComplete]);
 
-  const { layoutData, panLimitY, topBoundary, bottomBoundary, galleryRadius } =
+  // Layout Calculation Engine
+  const { layoutData, topBoundary, bottomBoundary, galleryRadius } =
     useMemo(() => {
+      // 1. Consistent R3F Context usage (no window.innerWidth)
       const isMobile = size.width < 768;
       let topBound = -Infinity;
       let bottomBound = Infinity;
@@ -58,8 +65,9 @@ export default function SphereGallery({
       });
 
       const mappedData = projectsData.map(
-        (proj: ProjectData, index: number) => {
-          let calcWidth, calcHeight, xPos, yPos, zPos;
+        (proj: ProjectData, index: number): CalculatedProjectData => {
+          let calcWidth: number, calcHeight: number;
+          let xPos: number, yPos: number, zPos: number;
 
           if (!isMobile) {
             const t = 5760;
@@ -132,7 +140,7 @@ export default function SphereGallery({
 
           return {
             ...proj,
-            id: `${proj.project.id}-${index}`,
+            id: proj.project.id, // 2. Cleaned up ID (Removed the index append to avoid mixed render/project IDs)
             calcWidth,
             calcHeight,
             xPos,
@@ -145,24 +153,28 @@ export default function SphereGallery({
 
       return {
         layoutData: mappedData,
-        panLimitY: Math.max(Math.abs(topBound), Math.abs(bottomBound)),
         topBoundary: topBound,
         bottomBoundary: bottomBound,
         galleryRadius: activeRadius,
       };
     }, [size.width, size.height]);
 
+  // 3. Cinematic Entrance GSAP (One-Shot Guarded)
   useEffect(() => {
-    if (!triggerIntro) return;
+    if (!triggerIntro || introStarted.current) return;
+    introStarted.current = true;
 
     const camera = get().camera as THREE.PerspectiveCamera;
-    const isMobile = window.innerWidth < 768;
+    const isMobile = size.width < 768; // Uses R3F context instead of window
 
     const ctx = gsap.context(() => {
-      camera.fov = isMobile ? 74 : 42;
-      camera.updateProjectionMatrix();
+      // Configuration extracted
+      const startFov = isMobile ? 74 : 42;
+      const startZ = isMobile ? 4000 : 7000;
 
-      camera.position.set(0, 0, isMobile ? 4000 : 7000);
+      camera.fov = startFov;
+      camera.updateProjectionMatrix();
+      camera.position.set(0, 0, startZ);
 
       gsap.to(camera.position, {
         z: 0,
@@ -170,21 +182,21 @@ export default function SphereGallery({
         ease: "power3.out",
         onComplete: () => {
           setIsDiveComplete(true);
-          // Safely call the ref so it doesn't trigger the dependency array
           if (onIntroCompleteRef.current) onIntroCompleteRef.current();
         },
       });
     });
 
     return () => ctx.revert();
-  }, [get, triggerIntro]); // <-- FIX: Removed onIntroComplete to stop double-firing
+  }, [get, triggerIntro, size.width]);
 
+  // 4. Pointer Interaction Tracking
   useEffect(() => {
     let initialized = false;
     let lastTime = performance.now();
     let lastX = 0;
     let lastY = 0;
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined; // Browser-safe timeout
 
     const handlePointerMove = (e: PointerEvent) => {
       if (e.pointerType !== "mouse") return;
@@ -200,14 +212,14 @@ export default function SphereGallery({
 
       const deltaTime = (currentTime - lastTime) / 1000;
       if (deltaTime > 0) {
-        velX.current = (e.clientX - lastX) / deltaTime;
-        velY.current = (e.clientY - lastY) / deltaTime;
+        rawVelX.current = (e.clientX - lastX) / deltaTime;
+        rawVelY.current = (e.clientY - lastY) / deltaTime;
       }
 
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
-        velX.current = 0;
-        velY.current = 0;
+        rawVelX.current = 0;
+        rawVelY.current = 0;
       }, 100);
 
       lastX = e.clientX;
@@ -218,11 +230,12 @@ export default function SphereGallery({
     window.addEventListener("pointermove", handlePointerMove);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
+    // 5. 3-Frame WebGL Warm-up Heuristic
     if (!readySignaled.current && onReady) {
       frameCounter.current += 1;
       if (frameCounter.current >= 3) {
@@ -231,20 +244,37 @@ export default function SphereGallery({
       }
     }
 
+    // 6. Smooth Pointer Velocity (LERP)
+    // Smooths the twitchy raw mouse values into a cinematic glide
+    smoothVelX.current = THREE.MathUtils.lerp(
+      smoothVelX.current,
+      rawVelX.current,
+      10 * delta,
+    );
+    smoothVelY.current = THREE.MathUtils.lerp(
+      smoothVelY.current,
+      rawVelY.current,
+      10 * delta,
+    );
+
     globalCurveX.current = THREE.MathUtils.clamp(
-      THREE.MathUtils.lerp(0, 0.2, Math.abs(velX.current) / 500),
+      THREE.MathUtils.lerp(0, 0.2, Math.abs(smoothVelX.current) / 500),
       0,
       0.3,
     );
+
     globalTiltAngle.current = THREE.MathUtils.degToRad(
-      Math.abs(velY.current) > 50
-        ? THREE.MathUtils.clamp((velY.current / 100) * 30, -30, 30)
+      Math.abs(smoothVelY.current) > 50
+        ? THREE.MathUtils.clamp((smoothVelY.current / 100) * 30, -30, 30)
         : 0,
     );
   });
 
+  // 7. Fix Hover Propagating Null
   useEffect(() => {
-    if (onSelectProject && hoveredId) {
+    // We remove the `hoveredId` falsy check so that `null` successfully passes to the parent
+    // allowing it to know when a hover state is cleared.
+    if (onSelectProject) {
       onSelectProject(hoveredId);
     }
   }, [hoveredId, onSelectProject]);
@@ -257,9 +287,9 @@ export default function SphereGallery({
         bottomBoundary={bottomBoundary}
         galleryRadius={galleryRadius}
       />
-      {layoutData.map((data: CalculatedProjectData) => (
+      {layoutData.map((data: CalculatedProjectData, index: number) => (
         <GalleryImage
-          key={data.id}
+          key={`${data.id}-${index}`} // Restore the safe render map key
           data={data}
           globalCurveX={globalCurveX}
           globalTiltAngle={globalTiltAngle}
