@@ -20,6 +20,11 @@ import {
   mapCharacters,
   mapStaff,
   mapRelations,
+  mapTags,
+  mapExternalLinks,
+  mapRecommendations,
+  mapAiring,
+  mapVoiceLanguages,
 } from './anilist.mappers';
 
 // ============================================================================
@@ -470,12 +475,16 @@ export class AniListAdapter implements MediaProvider {
       volumes: media.volumes || null,
 
       genres: media.genres || [],
-      tags: [],
+      tags: mapTags(media.tags),
       source: media.source || null,
       countryOfOrigin: media.countryOfOrigin || null,
       averageScore: media.averageScore || null,
       popularity: media.popularity || null,
       isAdult: media.isAdult || false,
+
+      // INJECT DERIVED INTELLIGENCE
+      airing: mapAiring(media),
+      voiceLanguages: mapVoiceLanguages(media.characters),
 
       trailer: media.trailer?.id
         ? {
@@ -504,9 +513,15 @@ export class AniListAdapter implements MediaProvider {
         meta: { total: media.relations?.edges?.length || 0, hasMore: false },
         items: mapRelations(media.relations),
       },
+      recommendations: {
+        meta: {
+          total: media.recommendations?.pageInfo?.total || 0,
+          hasMore: media.recommendations?.pageInfo?.hasNextPage || false,
+        },
+        items: mapRecommendations(media.recommendations),
+      },
 
-      recommendations: { meta: { total: 0, hasMore: false }, items: [] },
-      externalLinks: [],
+      externalLinks: mapExternalLinks(media.externalLinks),
       viewer: null,
     };
 

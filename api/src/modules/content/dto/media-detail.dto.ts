@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// --- Domain Enums ---
+// --- Core Enums ---
 export const MediaStatusSchema = z.enum([
   'FINISHED',
   'RELEASING',
@@ -39,7 +39,56 @@ export const MediaRelationTypeSchema = z.enum([
   'OTHER',
 ]);
 
-// --- Base Value Objects ---
+// --- Reusable Generic Collection ---
+export const CollectionMetaSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    hasMore: z.boolean(),
+  })
+  .strict();
+
+export const CollectionSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
+  z
+    .object({
+      meta: CollectionMetaSchema,
+      items: z.array(itemSchema),
+    })
+    .strict();
+
+// --- Live Airing Contract ---
+export const MediaAiringEpisodeSchema = z
+  .object({
+    episode: z.number().int().positive(),
+    airingAt: z.number().int().positive(), // UTC Unix Seconds
+  })
+  .strict();
+
+export const MediaAiringSchema = z
+  .object({
+    nextEpisode: MediaAiringEpisodeSchema.nullable(),
+    upcomingEpisodes: z.array(MediaAiringEpisodeSchema),
+    cadence: z.enum(['WEEKLY', 'BIWEEKLY', 'DAILY', 'IRREGULAR', 'UNKNOWN']),
+    cadenceConfidence: z.enum(['HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']),
+    updatedAt: z.string().datetime(), // ISO 8601 Timestamp of last cache refresh
+  })
+  .strict();
+
+// --- Voice & Audio Contract ---
+export const MediaVoiceLanguageSchema = z
+  .object({
+    code: z.string().min(1),
+    name: z.string().min(1),
+  })
+  .strict();
+
+export const MediaVoiceLanguagesSchema = z
+  .object({
+    languages: z.array(MediaVoiceLanguageSchema),
+    status: z.enum(['AVAILABLE', 'PARTIAL', 'NONE_LISTED', 'UNKNOWN']),
+  })
+  .strict();
+
+// --- Base Sub-Schemas ---
 export const FuzzyDateSchema = z
   .object({
     year: z.number().int().nullable(),
@@ -48,41 +97,29 @@ export const FuzzyDateSchema = z
   })
   .strict();
 
-export const CollectionMetaSchema = z
+export const MediaTitleSchema = z
   .object({
-    total: z.number().int().nonnegative(),
-    hasMore: z.boolean(),
+    english: z.string().nullable(),
+    romaji: z.string().nullable(),
+    native: z.string().nullable(),
   })
   .strict();
 
-const createCollectionSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
-  z
-    .object({
-      meta: CollectionMetaSchema,
-      items: z.array(itemSchema),
-    })
-    .strict();
+export const MediaImagesSchema = z
+  .object({
+    extraLarge: z.string().nullable(),
+    large: z.string().nullable(),
+    color: z.string().nullable(),
+  })
+  .strict();
 
-// --- Canonical Media Card (Used for Relations & Recommendations) ---
 export const MediaCardSchema = z
   .object({
     id: z.string(),
     providerId: z.string(),
     provider: z.string(),
-    title: z
-      .object({
-        english: z.string().nullable(),
-        romaji: z.string().nullable(),
-        native: z.string().nullable(),
-      })
-      .strict(),
-    coverImage: z
-      .object({
-        extraLarge: z.string().nullable(),
-        large: z.string().nullable(),
-        color: z.string().nullable(),
-      })
-      .strict(),
+    title: MediaTitleSchema,
+    coverImage: MediaImagesSchema,
     bannerImage: z.string().nullable(),
     colorHex: z.string().nullable(),
     status: MediaStatusSchema,
@@ -95,9 +132,9 @@ export const MediaCardSchema = z
     averageScore: z.number().nullable(),
     popularity: z.number().nullable(),
   })
-  .strip(); // Strips excess provider fields but strictly enforces our domain properties
+  .strip();
 
-// --- Relationship Sub-DTOs ---
+// --- Relationships ---
 export const VoiceActorSchema = z
   .object({
     id: z.string(),
@@ -136,7 +173,7 @@ export const MediaRelationSchema = z
   })
   .strict();
 
-// --- The Definitive MediaDetailDto ---
+// --- The Master DTO ---
 export const MediaDetailSchema = z
   .object({
     id: z.string().uuid(),
@@ -145,29 +182,11 @@ export const MediaDetailSchema = z
     type: z.enum(['ANIME', 'MANGA']),
     slug: z.string(),
 
-    title: z
-      .object({
-        english: z.string().nullable(),
-        romaji: z.string().nullable(),
-        native: z.string().nullable(),
-      })
-      .strict(),
+    title: MediaTitleSchema,
     synonyms: z.array(z.string()),
+    description: z.object({ text: z.string(), html: z.string() }).strict(), // Must be pre-sanitized
 
-    description: z
-      .object({
-        text: z.string(),
-        html: z.string(),
-      })
-      .strict(),
-
-    coverImage: z
-      .object({
-        extraLarge: z.string().nullable(),
-        large: z.string().nullable(),
-        color: z.string().nullable(),
-      })
-      .strict(),
+    coverImage: MediaImagesSchema,
     bannerImage: z.string().nullable(),
     colorHex: z.string().nullable(),
 
@@ -202,6 +221,9 @@ export const MediaDetailSchema = z
     popularity: z.number().int().nullable(),
     isAdult: z.boolean(),
 
+    airing: MediaAiringSchema.nullable(),
+    voiceLanguages: MediaVoiceLanguagesSchema,
+
     trailer: z
       .object({
         id: z.string(),
@@ -221,11 +243,10 @@ export const MediaDetailSchema = z
         .strict(),
     ),
 
-    characters: createCollectionSchema(MediaCharacterSchema),
-    staff: createCollectionSchema(MediaStaffSchema),
-    relations: createCollectionSchema(MediaRelationSchema),
-
-    recommendations: createCollectionSchema(
+    characters: CollectionSchema(MediaCharacterSchema),
+    staff: CollectionSchema(MediaStaffSchema),
+    relations: CollectionSchema(MediaRelationSchema),
+    recommendations: CollectionSchema(
       z
         .object({
           media: MediaCardSchema,
@@ -234,6 +255,7 @@ export const MediaDetailSchema = z
         })
         .strict(),
     ),
+
     externalLinks: z.array(
       z
         .object({
@@ -245,17 +267,10 @@ export const MediaDetailSchema = z
         })
         .strict(),
     ),
-
-    viewer: z
-      .object({
-        isAuthenticated: z.literal(true),
-        isFollowing: z.boolean(),
-        isFavorite: z.boolean(),
-        listStatus: z.string().nullable(),
-        progress: z.number().int().nullable(),
-      })
-      .nullable(),
+    viewer: z.any().nullable(), // Placeholder until ViewerMediaState is integrated
   })
   .strip();
 
 export type MediaDetailDto = z.infer<typeof MediaDetailSchema>;
+export type MediaAiringDto = z.infer<typeof MediaAiringSchema>;
+export type MediaVoiceLanguagesDto = z.infer<typeof MediaVoiceLanguagesSchema>;

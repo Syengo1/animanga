@@ -66,6 +66,9 @@ export default function GalleryImage({
   useLayoutEffect(() => {
     if (!texture) return;
 
+    // UPGRADE: Ensure strict sRGB color space mapping so textures don't look washed out
+    // with the newly added shader color chunks.
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
@@ -207,7 +210,7 @@ export default function GalleryImage({
         uSizeFactorX={data.calcWidth / 2000}
         uSizeFactorY={data.calcHeight / 2000}
         uOpacity={0}
-        transparent={true}
+        transparent={false} // UPGRADE: Changed to false. Unlocks huge GPU performance gains and stops sparkle bleed.
         side={THREE.DoubleSide}
       />
     </mesh>

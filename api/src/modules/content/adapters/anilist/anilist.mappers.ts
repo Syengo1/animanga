@@ -142,3 +142,163 @@ export const mapRelations = (relations: AniListMedia['relations']) => {
     },
   }));
 };
+
+// --- NEW INTELLIGENCE MAPPERS BELOW ---
+
+export const mapTags = (tags: AniListMedia['tags']) => {
+  if (!tags) return [];
+  return tags.map((tag) => ({
+    id: String(tag.id),
+    name: tag.name,
+    description: tag.description || null,
+    rank: tag.rank || null,
+    isSpoiler: tag.isMediaSpoiler || false,
+  }));
+};
+
+export const mapExternalLinks = (links: AniListMedia['externalLinks']) => {
+  if (!links) return [];
+  return links
+    .map((link) => ({
+      id: String(link.id),
+      url: link.url,
+      site: link.site,
+      icon: link.icon || null,
+      color: link.color || null,
+    }))
+    .filter((link) => {
+      // Safety check: Zod .url() will throw a 502 if AniList returns a malformed string
+      try {
+        new URL(link.url);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+};
+
+export const mapRecommendations = (
+  recommendations: AniListMedia['recommendations'],
+) => {
+  if (!recommendations?.edges) return [];
+
+  return recommendations.edges
+    .filter((edge) => edge.node.mediaRecommendation)
+    .map((edge, index) => {
+      const rec = edge.node.mediaRecommendation;
+      return {
+        score: edge.node.rating || null,
+        rank: index + 1,
+        media: {
+          id: String(rec.id),
+          providerId: String(rec.id),
+          provider: 'ANILIST',
+          title: {
+            english: rec.title?.english || null,
+            romaji: rec.title?.romaji || null,
+            native: rec.title?.native || null,
+          },
+          coverImage: {
+            extraLarge: normalizeImageUrl(
+              rec.coverImage?.extraLarge || rec.coverImage?.large,
+            ),
+            large: normalizeImageUrl(rec.coverImage?.large),
+            color: rec.coverImage?.color || null,
+          },
+          bannerImage: normalizeImageUrl(rec.bannerImage),
+          colorHex: rec.coverImage?.color || null,
+          status: mapStatus(rec.status),
+          format: mapFormat(rec.format),
+          episodes: rec.episodes || null,
+          chapters: rec.chapters || null,
+          volumes: rec.volumes || null,
+          season: rec.season || null,
+          seasonYear: rec.seasonYear || null,
+          averageScore: rec.averageScore || null,
+          popularity: rec.popularity || null,
+        },
+      };
+    });
+};
+
+export const mapAiring = (media: AniListMedia) => {
+  if (media.status !== 'RELEASING' && media.status !== 'NOT_YET_RELEASED')
+    return null;
+  if (!media.nextAiringEpisode) return null;
+
+  const next = {
+    episode: media.nextAiringEpisode.episode,
+    airingAt: media.nextAiringEpisode.airingAt,
+  };
+
+  const upcoming =
+    media.airingSchedule?.nodes
+      ?.map((node) => ({ episode: node.episode, airingAt: node.airingAt }))
+      .filter((node) => node.airingAt >= next.airingAt) // Ensure historical episodes don't corrupt the math
+      .sort((a, b) => a.airingAt - b.airingAt) || [];
+
+  let cadence: 'WEEKLY' | 'BIWEEKLY' | 'DAILY' | 'IRREGULAR' | 'UNKNOWN' =
+    'UNKNOWN';
+  let confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN' = 'LOW';
+
+  if (upcoming.length >= 2) {
+    const intervals: number[] = [];
+    for (let i = 1; i < upcoming.length; i++) {
+      intervals.push(upcoming[i].airingAt - upcoming[i - 1].airingAt);
+    }
+
+    // ~7 Days in seconds (604,800). Margin of 1 Hour (3,600) for daylight savings / broadcast drift.
+    const WEEK_SECONDS = 604800;
+    const MARGIN = 3600;
+
+    const isWeekly = intervals.every(
+      (diff) => Math.abs(diff - WEEK_SECONDS) <= MARGIN,
+    );
+
+    if (isWeekly) {
+      cadence = 'WEEKLY';
+      confidence = upcoming.length >= 3 ? 'HIGH' : 'MEDIUM';
+    } else {
+      cadence = 'IRREGULAR';
+      confidence = 'MEDIUM';
+    }
+  } else if (upcoming.length === 1) {
+    // We only have the next episode. Assume weekly but alert the UI that confidence is low.
+    cadence = 'WEEKLY';
+    confidence = 'LOW';
+  }
+
+  return {
+    nextEpisode: next,
+    upcomingEpisodes: upcoming,
+    cadence,
+    cadenceConfidence: confidence,
+    updatedAt: new Date().toISOString(),
+  };
+};
+
+export const mapVoiceLanguages = (characters?: AniListMedia['characters']) => {
+  const languagesMap = new Map<string, string>();
+
+  if (characters?.edges) {
+    characters.edges.forEach((edge) => {
+      edge.voiceActors?.forEach((va) => {
+        if (va.languageV2) {
+          // Extract a consistent shortcode (e.g., "Japanese" -> "ja", "English" -> "en")
+          const code = va.languageV2.substring(0, 2).toLowerCase();
+          languagesMap.set(code, va.languageV2);
+        }
+      });
+    });
+  }
+
+  const languages = Array.from(languagesMap.entries()).map(([code, name]) => ({
+    code,
+    name,
+  }));
+
+  return {
+    languages,
+    status: languages.length > 0 ? 'AVAILABLE' : 'NONE_LISTED',
+  };
+};
