@@ -29,7 +29,7 @@ export function MediaHero({ media }: MediaHeroProps) {
 
       <div className="container relative z-10 px-4 pb-20 flex flex-col md:flex-row items-end gap-8 md:gap-12">
         {/* Poster Image (Desktop) */}
-        <div className="hidden md:block w-64 lg:w-80 shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl overflow-hidden border border-white/10 relative aspect-[2/3] group">
+        <div className="hidden md:block w-64 lg:w-80 shrink-0 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-2xl overflow-hidden border border-border relative aspect-[2/3] group">
           <Image
             src={posterImage}
             alt={`${title} Poster`}
@@ -45,19 +45,19 @@ export function MediaHero({ media }: MediaHeroProps) {
             className="w-12 h-1 rounded-full mb-6 shadow-[0_0_10px_currentColor]"
             style={{ backgroundColor: accentColor, color: accentColor }}
           />
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tighter uppercase leading-[0.9] mb-4 text-white drop-shadow-2xl">
+          <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tighter uppercase leading-[0.9] mb-4 text-foreground drop-shadow-2xl">
             {title}
           </h1>
 
           {media.title?.native && (
-            <h2 className="text-xl md:text-2xl text-white/50 font-bold tracking-widest mb-6 uppercase">
+            <h2 className="text-xl md:text-2xl text-foreground/50 font-bold tracking-widest mb-6 uppercase">
               {media.title.native}
             </h2>
           )}
 
           {/* Core Badges & Genres */}
           <div className="flex flex-col gap-4 mb-4">
-            <div className="flex flex-wrap items-center gap-4 text-sm md:text-base font-bold tracking-wide uppercase text-white/80">
+            <div className="flex flex-wrap items-center gap-4 text-sm md:text-base font-bold tracking-wide uppercase text-foreground/80">
               {media.averageScore && (
                 <div className="flex items-center gap-1.5 text-yellow-500">
                   <Star className="w-5 h-5 fill-current" />
@@ -65,7 +65,7 @@ export function MediaHero({ media }: MediaHeroProps) {
                 </div>
               )}
               {media.format && (
-                <div className="flex items-center gap-1.5 border border-white/20 px-3 py-1 rounded-md bg-white/5">
+                <div className="flex items-center gap-1.5 border border-white/20 px-3 py-1 rounded-md bg-accent">
                   {media.type === "ANIME" ? (
                     <Tv className="w-4 h-4" />
                   ) : (
@@ -85,7 +85,7 @@ export function MediaHero({ media }: MediaHeroProps) {
             </div>
 
             {media.genres && media.genres.length > 0 && (
-              <div className="flex flex-wrap gap-2 text-xs md:text-sm text-white/60 font-medium">
+              <div className="flex flex-wrap gap-2 text-xs md:text-sm text-foreground/60 font-medium">
                 {media.genres.join(" · ")}
               </div>
             )}

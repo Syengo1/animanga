@@ -66,8 +66,8 @@ export default function ScrollIndicator() {
       <span
         className={cn(
           "text-xs tracking-[0.3em] uppercase mb-4 transition-all duration-300 font-bold",
-          status === "idle" && "text-white/50 animate-bounce",
-          status === "holding" && "text-white/90 scale-105",
+          status === "idle" && "text-foreground/50 animate-bounce",
+          status === "holding" && "text-foreground/90 scale-105",
           status === "ready" &&
             "text-primary scale-110 drop-shadow-[0_0_8px_rgba(var(--primary),0.8)]",
         )}
@@ -89,7 +89,7 @@ export default function ScrollIndicator() {
             stroke="currentColor"
             strokeWidth="2"
             fill="transparent"
-            className="text-white/20"
+            className="text-foreground/20"
           />
           <circle
             ref={circleRef}
@@ -105,7 +105,7 @@ export default function ScrollIndicator() {
             className="text-primary"
           />
         </svg>
-        <div className="absolute w-2 h-2 border-b-2 border-r-2 border-current transform rotate-45 mt-[-2px] text-white/70" />
+        <div className="absolute w-2 h-2 border-b-2 border-r-2 border-current transform rotate-45 mt-[-2px] text-foreground/70" />
       </div>
     </div>
   );

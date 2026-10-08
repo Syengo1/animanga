@@ -75,7 +75,7 @@ export function Pagination({
       <div className="flex items-center gap-1 mx-2">
         {getVisiblePages().map((page, idx) =>
           page === "..." ? (
-            <span key={`ellipsis-${idx}`} className="px-2 text-white/40">
+            <span key={`ellipsis-${idx}`} className="px-2 text-foreground/40">
               ...
             </span>
           ) : currentPage === page ? (
@@ -88,7 +88,7 @@ export function Pagination({
               href={createPageUrl(page as number)}
               className={cn(
                 buttonVariants({ variant: "ghost" }),
-                "w-9 h-9 text-white/70 hover:text-white",
+                "w-9 h-9 text-foreground/70 hover:text-foreground",
               )}
             >
               {page}

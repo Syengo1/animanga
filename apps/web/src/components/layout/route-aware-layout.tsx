@@ -14,7 +14,7 @@ export function RouteAwareLayout({ children }: { children: React.ReactNode }) {
   if (isAuthRoute) {
     return (
       // Strict viewport lock: Exactly 100% of the dynamic viewport height, zero scrolling allowed
-      <main className="w-full h-[100dvh] overflow-hidden bg-black selection:bg-primary selection:text-white">
+      <main className="w-full h-[100dvh] overflow-hidden bg-background selection:bg-primary selection:text-foreground">
         {children}
       </main>
     );

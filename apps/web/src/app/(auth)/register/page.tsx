@@ -312,8 +312,10 @@ function RegisterFormContent() {
     return (
       <div className="flex flex-col items-center justify-center py-12 space-y-4">
         <Loader2 className="size-12 animate-spin text-primary" />
-        <h3 className="text-xl font-bold text-white">Verifying your link...</h3>
-        <p className="text-sm text-white/60">
+        <h3 className="text-xl font-bold text-foreground">
+          Verifying your link...
+        </h3>
+        <p className="text-sm text-foreground/60">
           Please wait while we activate your account.
         </p>
       </div>
@@ -327,17 +329,17 @@ function RegisterFormContent() {
           <Check className="size-10 text-[#34A853]" />
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-white mb-2">
+          <h3 className="text-2xl font-bold text-foreground mb-2">
             Account Verified!
           </h3>
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-foreground/70">
             Welcome to Animanga. Your identity is secured and you are ready to
             enter the void.
           </p>
         </div>
         <Button
           onClick={() => router.push("/login")}
-          className="w-full h-12 bg-primary hover:bg-primary/90 text-white font-bold text-lg"
+          className="w-full h-12 bg-primary hover:bg-primary/90 text-foreground font-bold text-lg"
         >
           Proceed to Login
         </Button>
@@ -352,17 +354,17 @@ function RegisterFormContent() {
           <Check className="size-10 text-blue-500" />
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-white mb-2">
+          <h3 className="text-2xl font-bold text-foreground mb-2">
             Already Verified
           </h3>
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-foreground/70">
             This account has already been activated. You can safely proceed to
             login.
           </p>
         </div>
         <Button
           onClick={() => router.push("/login")}
-          className="w-full h-12 bg-primary hover:bg-primary/90 text-white font-bold text-lg"
+          className="w-full h-12 bg-primary hover:bg-primary/90 text-foreground font-bold text-lg"
         >
           Proceed to Login
         </Button>
@@ -377,8 +379,10 @@ function RegisterFormContent() {
           <MailX className="size-10 text-destructive" />
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-white mb-2">Link Expired</h3>
-          <p className="text-sm text-white/70">
+          <h3 className="text-2xl font-bold text-foreground mb-2">
+            Link Expired
+          </h3>
+          <p className="text-sm text-foreground/70">
             This verification link has expired. Please request a new one to
             activate your account.
           </p>
@@ -401,8 +405,10 @@ function RegisterFormContent() {
           <AlertCircle className="size-10 text-destructive" />
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-white mb-2">Invalid Link</h3>
-          <p className="text-sm text-white/70">
+          <h3 className="text-2xl font-bold text-foreground mb-2">
+            Invalid Link
+          </h3>
+          <p className="text-sm text-foreground/70">
             We couldn't recognize this verification link. Ensure you copied the
             full URL from your email.
           </p>
@@ -425,10 +431,10 @@ function RegisterFormContent() {
           <AlertCircle className="size-10 text-destructive" />
         </div>
         <div>
-          <h3 className="text-2xl font-bold text-white mb-2">
+          <h3 className="text-2xl font-bold text-foreground mb-2">
             Connection Error
           </h3>
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-foreground/70">
             We couldn't verify your email right now. Please check your
             connection and try again.
           </p>
@@ -451,24 +457,24 @@ function RegisterFormContent() {
           <Send className="size-8 text-blue-500" />
         </div>
         <div>
-          <h3 className="text-xl font-bold text-white mb-2">
+          <h3 className="text-xl font-bold text-foreground mb-2">
             Check your Inbox
           </h3>
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-foreground/70">
             We've securely reserved your handle. Please click the activation
             link sent to{" "}
-            <span className="text-white font-semibold">{resendEmail}</span> to
-            complete registration.
+            <span className="text-foreground font-semibold">{resendEmail}</span>{" "}
+            to complete registration.
           </p>
         </div>
-        <div className="pt-4 w-full border-t border-white/10">
-          <p className="text-xs text-white/50 mb-3">
+        <div className="pt-4 w-full border-t border-border">
+          <p className="text-xs text-foreground/50 mb-3">
             Didn't receive the email?
           </p>
           <Button
             onClick={handleResendLink}
             variant="ghost"
-            className="w-full text-white/70 hover:text-white hover:bg-white/5 text-xs h-8"
+            className="w-full text-foreground/70 hover:text-foreground hover:bg-accent text-xs h-8"
           >
             Click here to resend
           </Button>
@@ -485,14 +491,14 @@ function RegisterFormContent() {
         className="flex flex-col gap-[clamp(0.5rem,1.2dvh,1rem)]"
       >
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-white/70 uppercase tracking-wider">
+          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
             Full Name
           </label>
           <Input
             type="text"
             {...register("name")}
             placeholder="Monkey D. Luffy"
-            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-black/40 border-white/10 focus-visible:ring-primary text-sm"
+            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
           />
           {errors.name && (
             <p className="text-[10px] text-destructive leading-tight">
@@ -502,9 +508,9 @@ function RegisterFormContent() {
         </div>
 
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-white/70 uppercase tracking-wider flex justify-between">
+          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider flex justify-between">
             <span>Username</span>
-            <span className="text-white/30 lowercase normal-case">
+            <span className="text-foreground/30 lowercase normal-case">
               (Optional)
             </span>
           </label>
@@ -512,7 +518,7 @@ function RegisterFormContent() {
             type="text"
             {...register("username")}
             placeholder="joyboy_2026"
-            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-black/40 border-white/10 focus-visible:ring-primary text-sm"
+            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
           />
           {errors.username && (
             <p className="text-[10px] text-destructive leading-tight">
@@ -532,7 +538,7 @@ function RegisterFormContent() {
                     key={sug}
                     type="button"
                     onClick={() => applySuggestion(sug)}
-                    className="text-[11px] py-1.5 px-2 bg-black/40 hover:bg-primary/20 border border-white/5 rounded text-white/80 transition-colors truncate"
+                    className="text-[11px] py-1.5 px-2 bg-background/40 hover:bg-primary/20 border border-white/5 rounded text-foreground/80 transition-colors truncate"
                   >
                     {sug}
                   </button>
@@ -543,14 +549,14 @@ function RegisterFormContent() {
         </div>
 
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-white/70 uppercase tracking-wider">
+          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
             Email
           </label>
           <Input
             type="email"
             {...register("email")}
             placeholder="goku@capsulecorp.com"
-            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-black/40 border-white/10 focus-visible:ring-primary text-sm"
+            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
           />
           {errors.email && (
             <p className="text-[10px] text-destructive leading-tight">
@@ -560,7 +566,7 @@ function RegisterFormContent() {
         </div>
 
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-white/70 uppercase tracking-wider">
+          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
             Password
           </label>
           <div className="relative">
@@ -568,12 +574,12 @@ function RegisterFormContent() {
               type={showPassword ? "text" : "password"}
               {...register("password")}
               placeholder="••••••••"
-              className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-black/40 border-white/10 focus-visible:ring-primary pr-10 text-sm"
+              className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary pr-10 text-sm"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground/50 hover:text-foreground transition-colors"
             >
               {showPassword ? (
                 <EyeOff className="w-4 h-4" />
@@ -611,7 +617,7 @@ function RegisterFormContent() {
                   )}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-y-0.5 gap-x-2 text-[9px] sm:text-[10px] text-white/60">
+              <div className="grid grid-cols-2 gap-y-0.5 gap-x-2 text-[9px] sm:text-[10px] text-foreground/60">
                 <div className="flex items-center gap-1">
                   {checks.length ? (
                     <Check className="w-3 h-3 text-[#34A853]" />
@@ -660,7 +666,7 @@ function RegisterFormContent() {
           disabled={
             isSubmitting || (currentPassword.length > 0 && strengthScore < 4)
           }
-          className="w-full h-[clamp(2.25rem,4dvh,2.5rem)] mt-0.5 bg-primary hover:bg-primary/90 text-white font-bold text-sm transition-all duration-300 disabled:opacity-50"
+          className="w-full h-[clamp(2.25rem,4dvh,2.5rem)] mt-0.5 bg-primary hover:bg-primary/90 text-foreground font-bold text-sm transition-all duration-300 disabled:opacity-50"
         >
           {isSubmitting ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -672,10 +678,10 @@ function RegisterFormContent() {
 
       <div className="relative my-[clamp(0.75rem,2dvh,1.25rem)]">
         <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t border-white/10" />
+          <span className="w-full border-t border-border" />
         </div>
         <div className="relative flex justify-center text-[9px] font-bold uppercase tracking-wider">
-          <span className="bg-[#100c14] lg:bg-[#151119] px-2 text-white/50 rounded-full">
+          <span className="bg-[#100c14] lg:bg-[#151119] px-2 text-foreground/50 rounded-full">
             Or continue with
           </span>
         </div>
@@ -713,7 +719,7 @@ function RegisterFormContent() {
         Sign up with Google
       </Button>
 
-      <p className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-center text-white/50 mt-[clamp(0.75rem,2dvh,1.25rem)]">
+      <p className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-center text-foreground/50 mt-[clamp(0.75rem,2dvh,1.25rem)]">
         Already have an account?{" "}
         <Link
           href="/login"
@@ -728,19 +734,19 @@ function RegisterFormContent() {
 
 export default function RegisterPage() {
   return (
-    <div className="flex h-[100dvh] w-full bg-black overflow-hidden selection:bg-primary selection:text-white">
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-foreground">
       <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none">
-        <div className="absolute inset-0 bg-black/60 lg:bg-gradient-to-t lg:from-black lg:via-black/20 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
+        <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-black lg:via-black/20 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
         <img
           src="/assets/hero/makizenin.avif"
           alt="Registration Background"
           className="object-cover w-full h-full opacity-60 lg:opacity-80 scale-105"
         />
         <div className="hidden lg:block absolute bottom-[clamp(2rem,6dvh,3rem)] left-12 z-20 max-w-lg">
-          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-white tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
+          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-foreground tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
             JOIN THE VOID.
           </h2>
-          <p className="text-white/60 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
+          <p className="text-foreground/60 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
             Create your account to unlock exclusive ticket drops, track your
             anime watchlist, and connect with the community.
           </p>
@@ -753,7 +759,7 @@ export default function RegisterPage() {
             href="/"
             className="flex items-center gap-2 mb-[clamp(0.75rem,2dvh,1.5rem)] w-fit hover:opacity-80 transition-opacity mx-auto lg:mx-0"
           >
-            <span className="flex size-[clamp(2rem,4dvh,2.5rem)] items-center justify-center rounded-xl border border-white/10 bg-white/5 backdrop-blur-md">
+            <span className="flex size-[clamp(2rem,4dvh,2.5rem)] items-center justify-center rounded-xl border border-border bg-accent backdrop-blur-md">
               <Flame className="size-4 sm:size-5 text-primary" />
             </span>
             <span className="text-[clamp(1rem,2.5dvh,1.25rem)] font-bold tracking-tight">
@@ -761,12 +767,12 @@ export default function RegisterPage() {
             </span>
           </Link>
 
-          <Card className="bg-black/60 lg:bg-white/5 border-white/10 backdrop-blur-2xl shadow-2xl p-[clamp(1rem,2.5dvh,1.5rem)]">
+          <Card className="bg-background/60 lg:bg-accent border-border backdrop-blur-2xl shadow-2xl p-[clamp(1rem,2.5dvh,1.5rem)]">
             <CardHeader className="p-0 pb-[clamp(0.5rem,1.5dvh,1.25rem)]">
               <CardTitle className="text-[clamp(1.125rem,2.5dvh,1.5rem)] font-black tracking-tight">
                 Create Account
               </CardTitle>
-              <CardDescription className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-white/60">
+              <CardDescription className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-foreground/60">
                 Register to secure your identity on the platform.
               </CardDescription>
             </CardHeader>

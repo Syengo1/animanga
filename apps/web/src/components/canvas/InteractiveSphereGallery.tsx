@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useProgress } from "@react-three/drei";
 import { ArrowRight } from "lucide-react";
 import Scene from "@/components/canvas/Scene";
 import SphereGallery from "@/components/canvas/SphereGallery";
@@ -19,6 +18,7 @@ export default function InteractiveSphereGallery({
 }: InteractiveSphereGalleryProps) {
   const [phase, setPhase] = useState<IntroPhase>("loading");
   const [gpuReady, setGpuReady] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
   const [, setSelectedProjectId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -27,33 +27,40 @@ export default function InteractiveSphereGallery({
     onIntroCompleteRef.current = onIntroComplete;
   }, [onIntroComplete]);
 
-  const { progress } = useProgress();
-
-  // 1. Cap visual progress at 99% until the GPU actually renders the first frames.
-  // Using Math.floor prevents the text from rounding 99.6 up to 100 prematurely.
-  const displayProgress =
-    phase === "loading" ? Math.min(Math.floor(progress), 99) : 100;
-
-  // 2. Harmonized Readiness Progression
   useEffect(() => {
-    // The exact moment the network finishes AND the GPU paints the scene,
-    // we instantly unlock the experience. No artificial delays, perfect harmony.
-    if (phase === "loading" && progress >= 100 && gpuReady) {
-      setPhase("ready");
-    }
-  }, [progress, gpuReady, phase]);
+    if (phase !== "loading") return;
+    const interval = setInterval(() => {
+      setLoadProgress((p) => {
+        if (p >= 90) {
+          clearInterval(interval);
+          return 90;
+        }
+        return p + 15;
+      });
+    }, 40);
+    return () => clearInterval(interval);
+  }, [phase]);
 
-  // 3. Cinematic Entrance Timer
+  useEffect(() => {
+    if (phase === "loading" && gpuReady) {
+      setLoadProgress(100);
+      const timer = setTimeout(() => {
+        setPhase("ready");
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [gpuReady, phase]);
+
+  const displayProgress = phase === "loading" ? loadProgress : 100;
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-
     if (phase === "entering") {
       timer = setTimeout(() => {
         setPhase("complete");
         if (onIntroCompleteRef.current) onIntroCompleteRef.current();
       }, 1800);
     }
-
     return () => {
       if (timer) clearTimeout(timer);
     };
@@ -71,7 +78,6 @@ export default function InteractiveSphereGallery({
       const scrollY = window.scrollY;
       const windowHeight = window.innerHeight;
       const opacity = Math.max(1 - scrollY / (windowHeight * 0.8), 0);
-
       if (!ticking) {
         window.requestAnimationFrame(() => {
           if (containerRef.current) {
@@ -82,7 +88,6 @@ export default function InteractiveSphereGallery({
         ticking = true;
       }
     };
-
     handleScroll();
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
@@ -107,7 +112,6 @@ export default function InteractiveSphereGallery({
           }}
         />
       </Scene>
-
       {!isComplete && (
         <div
           className={cn(
@@ -120,7 +124,6 @@ export default function InteractiveSphereGallery({
                 : "opacity-100 bg-background/95 backdrop-blur-xl",
           )}
         >
-          {/* Ambient Background Glows */}
           <div
             className={cn(
               "absolute inset-0 overflow-hidden pointer-events-none transition-opacity duration-1000",
@@ -143,13 +146,11 @@ export default function InteractiveSphereGallery({
               <span className="text-xs md:text-sm font-bold tracking-[0.3em] uppercase text-primary mb-4 drop-shadow-md">
                 Welcome to Animanga
               </span>
-
-              <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tighter uppercase text-white mb-6 drop-shadow-2xl">
+              <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tighter uppercase text-foreground mb-6 drop-shadow-2xl">
                 Your Universe <br className="hidden md:block" />
-                <span className="text-white/70">Of Anime & Manga</span>
+                <span className="text-foreground/70">Of Anime & Manga</span>
               </h1>
-
-              <p className="text-sm md:text-base lg:text-lg font-medium text-white/60 tracking-wide mb-12 max-w-2xl leading-relaxed">
+              <p className="text-sm md:text-base lg:text-lg font-medium text-foreground/60 tracking-wide mb-12 max-w-2xl leading-relaxed">
                 Discover what's airing, find your next obsession, explore manga,
                 meet the community, and experience the culture beyond the
                 screen.
@@ -160,17 +161,12 @@ export default function InteractiveSphereGallery({
               type="button"
               onClick={handleEnter}
               disabled={!isReady || isEntering}
-              aria-label={
-                isReady
-                  ? "Enter the Animanga 3D experience"
-                  : "Loading Experience"
-              }
               className={cn(
                 "group relative h-14 md:h-16 rounded-full transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 isEntering ? "opacity-0 scale-95" : "opacity-100 delay-150",
                 isReady
-                  ? "w-64 md:w-72 cursor-pointer border border-primary/50 bg-primary/20 text-white font-black tracking-[0.2em] uppercase text-sm md:text-base shadow-[0_0_30px_rgba(0,0,0,0.5)] hover:bg-primary/30 hover:scale-[1.02] hover:border-primary"
-                  : "w-72 md:w-96 cursor-wait border border-white/10 bg-white/5",
+                  ? "w-64 md:w-72 cursor-pointer border border-primary/50 bg-primary/20 text-foreground font-black tracking-[0.2em] uppercase text-sm md:text-base shadow-[0_0_30px_rgba(0,0,0,0.5)] hover:bg-primary/30 hover:scale-[1.02] hover:border-primary"
+                  : "w-72 md:w-96 cursor-wait border border-border bg-accent",
               )}
             >
               <div
@@ -181,7 +177,7 @@ export default function InteractiveSphereGallery({
               >
                 <span className="drop-shadow-md">Enter Peak</span>
                 <ArrowRight className="w-5 h-5 ml-3 transition-transform group-hover:translate-x-1" />
-                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-foreground/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
 
               <div
@@ -194,10 +190,9 @@ export default function InteractiveSphereGallery({
                   className="absolute left-0 top-0 bottom-0 bg-primary transition-all duration-300 ease-out"
                   style={{ width: `${displayProgress}%` }}
                 >
-                  <div className="absolute top-0 right-0 bottom-0 w-12 bg-gradient-to-r from-transparent to-white/30 blur-[2px]" />
+                  <div className="absolute top-0 right-0 bottom-0 w-12 bg-gradient-to-r from-transparent to-foreground/30 blur-[2px]" />
                 </div>
-
-                <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 text-white/80 font-bold tracking-[0.2em] uppercase text-xs md:text-sm">
+                <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 text-foreground/80 font-bold tracking-[0.2em] uppercase text-xs md:text-sm">
                   <span>Preparing Experience</span>
                   <span className="w-12 text-right tabular-nums">
                     {displayProgress}%
@@ -211,16 +206,15 @@ export default function InteractiveSphereGallery({
                 "mt-8 text-[10px] md:text-xs font-bold tracking-[0.3em] uppercase transition-opacity duration-1000 flex items-center",
                 isReady
                   ? "opacity-100 text-primary"
-                  : "opacity-0 text-white/40",
+                  : "opacity-0 text-foreground/40",
               )}
-              aria-live="polite"
             >
               <span
                 className={cn(
                   "inline-block w-2 h-2 rounded-full mr-3",
                   isReady
                     ? "bg-primary animate-pulse shadow-[0_0_10px_currentColor]"
-                    : "bg-white/20",
+                    : "bg-foreground/20",
                 )}
               />
               {isReady ? "3D Experience Is Ready" : "Initializing..."}

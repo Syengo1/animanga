@@ -88,11 +88,11 @@ export function CatalogGrid({
 
   if (status === "success" && allItems.length === 0) {
     return (
-      <div className="py-24 text-center border border-dashed border-white/10 rounded-2xl">
-        <p className="text-white/60 mb-2">
+      <div className="py-24 text-center border border-dashed border-border rounded-2xl">
+        <p className="text-foreground/60 mb-2">
           No {routeType} matches these filters.
         </p>
-        <p className="text-xs text-white/30">
+        <p className="text-xs text-foreground/30">
           Adjust your criteria or reset the search query.
         </p>
       </div>

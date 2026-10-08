@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -50,8 +51,8 @@ export function LiquidMediaPlayer({
 
   if (!items?.length || !activeItem) {
     return (
-      <section className="w-full py-24 bg-background border-t border-white/5 relative z-20 flex flex-col items-center justify-center min-h-[600px]">
-        <div className="flex p-1 bg-white/5 backdrop-blur-md border border-white/10 rounded-full mb-10 shadow-2xl">
+      <section className="w-full py-24 bg-background border-t border-border relative z-20 flex flex-col items-center justify-center min-h-[600px]">
+        <div className="flex p-1 bg-accent backdrop-blur-md border border-border rounded-full mb-10 shadow-2xl">
           {TABS.map((tab) => (
             <button
               key={tab}
@@ -59,14 +60,14 @@ export function LiquidMediaPlayer({
               className={cn(
                 "relative px-6 py-2 rounded-full text-sm font-bold transition-colors",
                 activeTab === tab
-                  ? "text-white"
-                  : "text-white/50 hover:text-white/90",
+                  ? "text-foreground"
+                  : "text-foreground/50 hover:text-foreground/90",
               )}
             >
               {activeTab === tab && (
                 <motion.div
                   layoutId="empty-tab"
-                  className="absolute inset-0 bg-white/10 border border-white/20 rounded-full"
+                  className="absolute inset-0 bg-foreground/10 border border-border rounded-full"
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}
@@ -74,7 +75,7 @@ export function LiquidMediaPlayer({
             </button>
           ))}
         </div>
-        <div className="text-white/50 font-medium">
+        <div className="text-foreground/50 font-medium">
           Coming Soon: Platform Events & Conventions
         </div>
       </section>
@@ -93,7 +94,7 @@ export function LiquidMediaPlayer({
     "/placeholder.jpg";
 
   return (
-    <section className="w-full py-16 md:py-24 bg-background border-t border-white/5 relative z-20 overflow-hidden">
+    <section className="w-full py-16 md:py-24 bg-background border-t border-border relative z-20 overflow-hidden">
       <div className="container mx-auto px-4">
         {/* TOP ROW */}
         <div className="flex flex-col md:flex-row gap-6 lg:gap-10 mb-10 md:mb-16">
@@ -108,14 +109,14 @@ export function LiquidMediaPlayer({
                   className={cn(
                     "relative flex items-center px-5 py-3 md:py-4 text-sm md:text-base font-bold text-left rounded-xl transition-colors group shrink-0",
                     isActive
-                      ? "text-white"
-                      : "text-white/50 hover:text-white/90",
+                      ? "text-foreground"
+                      : "text-foreground/50 hover:text-foreground/90",
                   )}
                 >
                   {isActive && (
                     <motion.div
                       layoutId="sidebar-active"
-                      className="absolute inset-0 bg-white/10 border border-white/20 rounded-xl"
+                      className="absolute inset-0 bg-foreground/10 border border-border rounded-xl"
                       transition={{
                         type: "spring",
                         bounce: 0.2,
@@ -131,7 +132,7 @@ export function LiquidMediaPlayer({
 
           {/* PLAYER */}
           <div className="flex-1 flex flex-col min-w-0">
-            <div className="relative w-full aspect-video md:aspect-[21/9] lg:aspect-[2.35/1] rounded-2xl md:rounded-[2rem] bg-black border border-white/10 overflow-hidden shadow-2xl group">
+            <div className="relative w-full aspect-video md:aspect-[21/9] lg:aspect-[2.35/1] rounded-2xl md:rounded-[2rem] bg-background border border-border overflow-hidden shadow-2xl group">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={activeItem.id}
@@ -146,7 +147,7 @@ export function LiquidMediaPlayer({
                       src={heroImgUrl}
                       alt={title}
                       fill
-                      className="object-cover object-top opacity-80 mix-blend-screen"
+                      className="object-cover object-top opacity-80 mix-blend-luminosity dark:mix-blend-screen"
                       priority
                     />
                   )}
@@ -160,27 +161,27 @@ export function LiquidMediaPlayer({
                         color: accentColor,
                       }}
                     />
-                    <h2 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase leading-[0.9] mb-4 text-white drop-shadow-2xl">
+                    <h2 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase leading-[0.9] mb-4 text-foreground drop-shadow-2xl">
                       {title}
                     </h2>
-                    <p className="text-sm md:text-base text-white/70 line-clamp-2 md:line-clamp-3 mb-8 font-medium max-w-xl">
+                    <p className="text-sm md:text-base text-foreground/70 line-clamp-2 md:line-clamp-3 mb-8 font-medium max-w-xl">
                       {activeItem.synopsis
                         ? activeItem.synopsis.replace(/<\/?[^>]+(>|$)/g, "")
                         : "No description available."}
                     </p>
                     <div className="flex items-center gap-3">
                       <Link
-                        href={`/${activeTab.toLowerCase()}/${activeItem.id}`} // FIX: Use Internal UUID
+                        href={`/${activeTab.toLowerCase()}/${activeItem.id}`}
                         className={cn(
                           buttonVariants({ variant: "default" }),
-                          "bg-white hover:bg-white/90 text-black h-12 md:h-14 px-8 md:px-10 rounded-xl font-bold text-base transition-transform hover:scale-105",
+                          "bg-foreground hover:bg-foreground/90 text-background h-12 md:h-14 px-8 md:px-10 rounded-xl font-bold text-base transition-transform hover:scale-105",
                         )}
                       >
                         <Info className="w-5 h-5 mr-2" /> More Info
                       </Link>
                       <Button
                         variant="ghost"
-                        className="bg-white/10 hover:bg-white/20 border border-white/20 text-white h-12 md:h-14 w-12 md:w-14 rounded-xl backdrop-blur-md transition-transform hover:scale-105 p-0"
+                        className="bg-foreground/10 hover:bg-foreground/20 border border-border text-foreground h-12 md:h-14 w-12 md:w-14 rounded-xl backdrop-blur-md transition-transform hover:scale-105 p-0"
                       >
                         <Plus className="w-6 h-6" />
                       </Button>
@@ -195,14 +196,14 @@ export function LiquidMediaPlayer({
         {/* BOTTOM ROW: THUMBNAILS */}
         <div className="flex flex-col gap-4 w-full">
           <div className="flex items-center justify-between px-1">
-            <h3 className="text-xl md:text-2xl font-bold tracking-tight text-white">
+            <h3 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
               Trending {activeTab.charAt(0) + activeTab.slice(1).toLowerCase()}
             </h3>
             <div className="hidden md:flex gap-2">
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10"
+                className="h-8 w-8 rounded-full bg-accent hover:bg-foreground/10 border border-border"
                 onClick={() => scrollThumbnails("left")}
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -210,7 +211,7 @@ export function LiquidMediaPlayer({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10"
+                className="h-8 w-8 rounded-full bg-accent hover:bg-foreground/10 border border-border"
                 onClick={() => scrollThumbnails("right")}
               >
                 <ChevronRight className="w-4 h-4" />
@@ -232,6 +233,7 @@ export function LiquidMediaPlayer({
                 item.coverImage?.extraLarge ??
                 item.coverImage?.large ??
                 "/placeholder.jpg";
+
               return (
                 <div
                   key={item.id}
@@ -239,8 +241,8 @@ export function LiquidMediaPlayer({
                   className={cn(
                     "relative aspect-video w-[240px] md:w-[280px] lg:w-[320px] shrink-0 snap-start rounded-xl overflow-hidden cursor-pointer border transition-all duration-300",
                     isSelected
-                      ? "border-white/60 ring-4 ring-white/20 scale-[1.03] shadow-2xl z-10"
-                      : "border-white/10 opacity-60 hover:opacity-100 hover:border-white/30",
+                      ? "border-foreground/60 ring-4 ring-foreground/20 scale-[1.03] shadow-2xl z-10"
+                      : "border-border opacity-60 hover:opacity-100 hover:border-foreground/30",
                   )}
                 >
                   {thumbImgUrl !== "/placeholder.jpg" && (
@@ -253,13 +255,13 @@ export function LiquidMediaPlayer({
                     />
                   )}
                   {item.averageScore && (
-                    <div className="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-1.5 py-0.5 rounded flex items-center gap-1 text-[10px] md:text-xs font-bold border border-white/10">
+                    <div className="absolute top-2 left-2 bg-background/80 backdrop-blur-md px-1.5 py-0.5 rounded flex items-center gap-1 text-[10px] md:text-xs font-bold border border-border">
                       <Star className="w-3 h-3 text-yellow-500 fill-current" />
                       {(item.averageScore / 10).toFixed(1)}
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-4 opacity-100 transition-opacity duration-300">
-                    <span className="text-sm font-bold text-white line-clamp-1 drop-shadow-md">
+                  <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent flex flex-col justify-end p-4 opacity-100 transition-opacity duration-300">
+                    <span className="text-sm font-bold text-foreground line-clamp-1 drop-shadow-md">
                       {itemTitle}
                     </span>
                   </div>

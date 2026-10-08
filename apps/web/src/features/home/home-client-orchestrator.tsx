@@ -39,7 +39,7 @@ export function HomeClientOrchestrator({
         />
       ) : (
         <section className="py-24 flex items-center justify-center min-h-[400px]">
-          <div className="text-white/50 font-medium">
+          <div className="text-foreground/50 font-medium">
             Coming Soon: Platform Events & Conventions
           </div>
         </section>

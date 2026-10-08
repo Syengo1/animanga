@@ -86,7 +86,7 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
       <div className="container px-4 grid grid-cols-1 lg:grid-cols-12 gap-12">
         <div className="lg:col-span-8 flex flex-col gap-16">
           <section>
-            <h3 className="text-2xl font-black tracking-tight uppercase text-white mb-6 flex items-center gap-3">
+            <h3 className="text-2xl font-black tracking-tight uppercase text-foreground mb-6 flex items-center gap-3">
               <span
                 className="w-2 h-8 rounded-sm"
                 style={{ backgroundColor: media.colorHex || "var(--primary)" }}
@@ -94,14 +94,14 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
               Overview
             </h3>
             <div
-              className="prose prose-invert max-w-none text-white/70 font-medium leading-relaxed prose-p:mb-4"
+              className="prose prose-invert max-w-none text-foreground/70 font-medium leading-relaxed prose-p:mb-4"
               dangerouslySetInnerHTML={{ __html: media.description.html }}
             />
           </section>
 
           {media.characters.items.length > 0 && (
             <section>
-              <h3 className="text-2xl font-black tracking-tight uppercase text-white mb-6 flex items-center gap-3">
+              <h3 className="text-2xl font-black tracking-tight uppercase text-foreground mb-6 flex items-center gap-3">
                 <span
                   className="w-2 h-8 rounded-sm"
                   style={{

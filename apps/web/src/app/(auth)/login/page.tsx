@@ -196,7 +196,7 @@ function LoginForm() {
         href="/"
         className="flex items-center gap-2 mb-[clamp(1rem,3dvh,2rem)] w-fit hover:opacity-80 transition-opacity mx-auto lg:mx-0"
       >
-        <span className="flex size-[clamp(2rem,5dvh,2.5rem)] items-center justify-center rounded-xl border border-white/10 bg-white/5 backdrop-blur-md">
+        <span className="flex size-[clamp(2rem,5dvh,2.5rem)] items-center justify-center rounded-xl border border-border bg-accent backdrop-blur-md">
           <Flame className="size-4 sm:size-5 text-primary" />
         </span>
         <span className="text-[clamp(1.125rem,2.5dvh,1.25rem)] font-bold tracking-tight">
@@ -204,12 +204,12 @@ function LoginForm() {
         </span>
       </Link>
 
-      <Card className="bg-black/60 lg:bg-white/5 border-white/10 backdrop-blur-2xl shadow-2xl p-[clamp(1rem,4dvh,2rem)]">
+      <Card className="bg-background/60 lg:bg-accent border-border backdrop-blur-2xl shadow-2xl p-[clamp(1rem,4dvh,2rem)]">
         <CardHeader className="p-0 pb-[clamp(0.75rem,2dvh,1.5rem)]">
           <CardTitle className="text-[clamp(1.25rem,3dvh,1.5rem)] font-black tracking-tight">
             Welcome back.
           </CardTitle>
-          <CardDescription className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-white/60">
+          <CardDescription className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-foreground/60">
             Enter the void and access your ticket wallet.
           </CardDescription>
         </CardHeader>
@@ -219,14 +219,14 @@ function LoginForm() {
             className="flex flex-col gap-[clamp(0.75rem,2dvh,1.25rem)]"
           >
             <div className="space-y-[clamp(0.25rem,1dvh,0.375rem)]">
-              <label className="text-[10px] sm:text-[11px] font-bold text-white/70 uppercase tracking-wider">
+              <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
                 Email
               </label>
               <Input
                 type="email"
                 {...register("email")}
                 placeholder="goku@capsulecorp.com"
-                className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-black/40 border-white/10 focus-visible:ring-primary text-sm"
+                className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
               />
               {errors.email && (
                 <p className="text-xs text-destructive mt-1">
@@ -236,7 +236,7 @@ function LoginForm() {
             </div>
             <div className="space-y-[clamp(0.25rem,1dvh,0.375rem)]">
               <div className="flex justify-between items-center">
-                <label className="text-[10px] sm:text-[11px] font-bold text-white/70 uppercase tracking-wider">
+                <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
                   Password
                 </label>
                 <Link
@@ -251,12 +251,12 @@ function LoginForm() {
                   type={showPassword ? "text" : "password"}
                   {...register("password")}
                   placeholder="••••••••"
-                  className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-black/40 border-white/10 focus-visible:ring-primary pr-10 text-sm"
+                  className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-background/40 border-border focus-visible:ring-primary pr-10 text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground/50 hover:text-foreground transition-colors"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (
@@ -304,8 +304,8 @@ function LoginForm() {
               className={cn(
                 "w-full h-[clamp(2.5rem,5dvh,2.75rem)] mt-1 font-bold text-sm sm:text-base transition-all duration-300",
                 isSuccess
-                  ? "bg-[#34A853] hover:bg-[#34A853] text-white"
-                  : "bg-primary hover:bg-primary/90 text-white",
+                  ? "bg-[#34A853] hover:bg-[#34A853] text-foreground"
+                  : "bg-primary hover:bg-primary/90 text-foreground",
               )}
             >
               {isSubmitting ? (
@@ -322,10 +322,10 @@ function LoginForm() {
 
           <div className="relative my-[clamp(1rem,3dvh,1.5rem)]">
             <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-white/10" />
+              <span className="w-full border-t border-border" />
             </div>
             <div className="relative flex justify-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">
-              <span className="bg-[#100c14] lg:bg-[#151119] px-2 text-white/50 rounded-full">
+              <span className="bg-[#100c14] lg:bg-[#151119] px-2 text-foreground/50 rounded-full">
                 Or continue with
               </span>
             </div>
@@ -363,7 +363,7 @@ function LoginForm() {
             Sign in with Google
           </Button>
 
-          <p className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-center text-white/50 mt-[clamp(1rem,3dvh,1.5rem)]">
+          <p className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-center text-foreground/50 mt-[clamp(1rem,3dvh,1.5rem)]">
             Don't have an account?{" "}
             <Link
               href="/register"
@@ -380,19 +380,19 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="flex h-[100dvh] w-full bg-black overflow-hidden selection:bg-primary selection:text-white">
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-foreground">
       <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none">
-        <div className="absolute inset-0 bg-black/60 lg:bg-gradient-to-t lg:from-black lg:via-black/20 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
+        <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-black lg:via-black/20 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
         <img
           src="/assets/hero/juju.avif"
           alt="Login Background"
           className="object-cover w-full h-full opacity-60 lg:opacity-80 scale-105"
         />
         <div className="hidden lg:block absolute bottom-[clamp(2rem,6dvh,3rem)] left-12 z-20 max-w-lg">
-          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-white tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
+          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-foreground tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
             YOUR GATEWAY TO THE CULTURE.
           </h2>
-          <p className="text-white/60 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
+          <p className="text-foreground/60 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
             Manage your digital tickets, track upcoming conventions, and secure
             limited edition merchandise drops.
           </p>

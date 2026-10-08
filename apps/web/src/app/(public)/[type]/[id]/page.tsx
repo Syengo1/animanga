@@ -105,8 +105,8 @@ export default async function CategoryOrRedirectPage({
         totalItems={payload?.pagination?.totalItems || 0}
       >
         {items.length === 0 ? (
-          <div className="py-32 flex flex-col items-center justify-center text-center border border-dashed border-white/10 rounded-2xl bg-black/20">
-            <p className="text-xl font-bold text-white/60 mb-2">
+          <div className="py-32 flex flex-col items-center justify-center text-center border border-dashed border-border rounded-2xl bg-background/20">
+            <p className="text-xl font-bold text-foreground/60 mb-2">
               No {cleanType} found.
             </p>
           </div>

@@ -1,4 +1,5 @@
 "use client";
+
 import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -39,8 +40,6 @@ export function CatalogShowcase({ categories, error }: CatalogShowcaseProps) {
 
 function MediaRow({ category }: { category: MediaCategory }) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  // Extract route type (anime/manga) safely from the href
   const routeType = category.href.split("/")[1] || "anime";
 
   const scroll = (direction: "left" | "right") => {
@@ -58,12 +57,13 @@ function MediaRow({ category }: { category: MediaCategory }) {
     <div className="w-full flex flex-col gap-4">
       <div className="container mx-auto px-4 flex items-end justify-between">
         <Link href={category.href} className="group flex items-center gap-2">
-          <h3 className="text-xl md:text-2xl font-bold tracking-tight hover:text-primary transition-colors">
+          <h3 className="text-xl md:text-2xl font-bold tracking-tight hover:text-primary transition-colors text-foreground">
             {category.title}
           </h3>
           <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
         </Link>
       </div>
+
       <div className="relative group/slider">
         <div
           ref={scrollContainerRef}
@@ -74,9 +74,9 @@ function MediaRow({ category }: { category: MediaCategory }) {
           ))}
           <Link
             href={category.href}
-            className="shrink-0 snap-start w-[140px] md:w-[180px] lg:w-[200px] aspect-[2/3] rounded-xl border border-white/10 bg-white/5 flex flex-col items-center justify-center gap-3 text-muted-foreground hover:text-white hover:bg-white/10 hover:border-white/20 transition-all"
+            className="shrink-0 snap-start w-[140px] md:w-[180px] lg:w-[200px] aspect-[2/3] rounded-xl border border-border bg-accent flex flex-col items-center justify-center gap-3 text-muted-foreground hover:text-foreground hover:bg-foreground/10 hover:border-foreground/20 transition-all"
           >
-            <div className="w-12 h-12 rounded-full bg-black/50 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-full bg-background/50 flex items-center justify-center">
               <ArrowRight className="w-6 h-6" />
             </div>
             <span className="font-bold text-sm">View All</span>
@@ -104,7 +104,7 @@ function MediaPortraitCard({ media, type }: { media: any; type: string }) {
       href={`/${type}/${media.id}`}
       className="shrink-0 snap-start w-[140px] md:w-[180px] lg:w-[200px] flex flex-col gap-3 group cursor-pointer"
     >
-      <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:border-white/30 group-hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
+      <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-accent border border-border transition-all duration-300 group-hover:border-foreground/30 group-hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
         {coverUrl && coverUrl !== "/placeholder.jpg" && (
           <Image
             src={coverUrl}
@@ -114,21 +114,22 @@ function MediaPortraitCard({ media, type }: { media: any; type: string }) {
             className="object-cover transition-transform duration-500 group-hover:scale-105"
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
         {media.averageScore && (
-          <div className="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-1.5 py-0.5 rounded flex items-center gap-1 text-[10px] md:text-xs font-bold border border-white/10 z-10">
+          <div className="absolute top-2 left-2 bg-background/80 backdrop-blur-md px-1.5 py-0.5 rounded flex items-center gap-1 text-[10px] md:text-xs font-bold border border-border z-10 text-foreground">
             <Star className="w-3 h-3 text-yellow-500 fill-current" />
             {media.averageScore}%
           </div>
         )}
         <div
-          className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded bg-black/80 backdrop-blur-md text-[10px] font-bold text-center border border-white/10 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10"
+          className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded bg-background/80 backdrop-blur-md text-[10px] font-bold text-center border border-border opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10"
           style={{ color: dominantColor }}
         >
           {media.status}
         </div>
       </div>
-      <h4 className="text-sm md:text-base font-semibold leading-tight line-clamp-2 group-hover:text-primary transition-colors">
+      <h4 className="text-sm md:text-base font-semibold leading-tight line-clamp-2 text-foreground group-hover:text-primary transition-colors">
         {title}
       </h4>
     </Link>

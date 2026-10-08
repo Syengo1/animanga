@@ -20,7 +20,7 @@ export function MediaRelations({
 
   return (
     <section>
-      <h3 className="text-2xl font-black tracking-tight uppercase text-white mb-6 flex items-center gap-3">
+      <h3 className="text-2xl font-black tracking-tight uppercase text-foreground mb-6 flex items-center gap-3">
         <span
           className="w-2 h-8 bg-primary rounded-sm"
           style={{ backgroundColor: accentColor }}
@@ -32,7 +32,7 @@ export function MediaRelations({
         {relevantRelations.map((rel, idx) => (
           <div key={`${rel.media.id}-${idx}`} className="flex flex-col gap-2">
             <span
-              className="text-[10px] font-black tracking-widest uppercase px-2 py-1 rounded bg-white/5 border border-white/10 w-fit"
+              className="text-[10px] font-black tracking-widest uppercase px-2 py-1 rounded bg-accent border border-border w-fit"
               style={{ color: accentColor }}
             >
               {rel.relationType.replace(/_/g, " ")}

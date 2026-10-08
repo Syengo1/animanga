@@ -9,11 +9,11 @@ type ParticlesProps = {
   background?: string;
   minSize?: number;
   maxSize?: number;
-  speed?: number; 
-  particleSpeed?: number; 
+  speed?: number;
+  particleSpeed?: number;
   particleColor?: string;
   particleDensity?: number;
-  children?: React.ReactNode; // Added children prop
+  children?: React.ReactNode;
 };
 
 const hexToRgb = (hex: string) => {
@@ -33,7 +33,7 @@ export const SparklesCore = (props: ParticlesProps) => {
     particleSpeed = 0.5,
     particleColor = "#ffffff",
     particleDensity = 0.5,
-    children, // Extract children
+    children,
   } = props;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,11 +44,14 @@ export const SparklesCore = (props: ParticlesProps) => {
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const ctx = canvas.getContext("2d", { alpha: false });
+    // CRITICAL FIX: Changed alpha to true.
+    // This allows the canvas to be transparent, letting the Next-Themes
+    // HTML background (white in light mode, black in dark mode) show through perfectly.
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
     let animationFrameId: number;
-    
+
     type Particle = {
       x: number;
       y: number;
@@ -58,12 +61,16 @@ export const SparklesCore = (props: ParticlesProps) => {
       opacity: number;
       opacityVel: number;
     };
-    
+
     let particles: Particle[] = [];
 
-    const mappedDensity = 5 + ((Math.max(0.1, Math.min(1, particleDensity)) - 0.1) / 0.9) * 55;
-    const flickerSpeed = 0.5 + ((Math.max(0.1, Math.min(1, speed)) - 0.1) / 0.9) * 11.5;
-    const rgbColor = particleColor.startsWith("#") ? hexToRgb(particleColor) : particleColor;
+    const mappedDensity =
+      5 + ((Math.max(0.1, Math.min(1, particleDensity)) - 0.1) / 0.9) * 55;
+    const flickerSpeed =
+      0.5 + ((Math.max(0.1, Math.min(1, speed)) - 0.1) / 0.9) * 11.5;
+    const rgbColor = particleColor.startsWith("#")
+      ? hexToRgb(particleColor)
+      : particleColor;
 
     const initParticles = (width: number, height: number) => {
       const area = width * height;
@@ -143,7 +150,15 @@ export const SparklesCore = (props: ParticlesProps) => {
       window.removeEventListener("resize", resize);
       cancelAnimationFrame(animationFrameId);
     };
-  }, [background, minSize, maxSize, speed, particleSpeed, particleColor, particleDensity]);
+  }, [
+    background,
+    minSize,
+    maxSize,
+    speed,
+    particleSpeed,
+    particleColor,
+    particleDensity,
+  ]);
 
   return (
     <motion.div
