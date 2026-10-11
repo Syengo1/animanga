@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Flame, Menu, ShoppingBag, Ticket, X } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/ui/theme-toggle"; // <-- Inject Toggle
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const navigation = [
   { href: "/events", label: "Events", icon: Ticket },
@@ -15,7 +15,6 @@ export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    // FIX: Replaced bg-background/70 with bg-background/80 and border-border with border-border
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl transition-colors duration-300">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link
@@ -23,7 +22,6 @@ export function Navbar() {
           className="flex items-center gap-2 text-lg font-bold tracking-tight"
           onClick={() => setIsOpen(false)}
         >
-          {/* FIX: Semantic borders/backgrounds */}
           <span className="flex size-9 items-center justify-center rounded-xl border border-foreground/10 bg-foreground/5">
             <Flame className="size-5" />
           </span>
@@ -32,6 +30,7 @@ export function Navbar() {
           </span>
         </Link>
 
+        {/* Desktop Navigation */}
         <nav className="hidden items-center gap-8 md:flex">
           {navigation.map(({ href, label }) => (
             <Link
@@ -44,6 +43,7 @@ export function Navbar() {
           ))}
         </nav>
 
+        {/* Desktop Actions */}
         <div className="hidden items-center gap-3 md:flex">
           <ThemeToggle />
           <Link
@@ -60,15 +60,19 @@ export function Navbar() {
           </Link>
         </div>
 
-        <button
-          type="button"
-          aria-label={isOpen ? "Close menu" : "Open menu"}
-          aria-expanded={isOpen}
-          onClick={() => setIsOpen((open) => !open)}
-          className="rounded-lg p-2 text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground md:hidden"
-        >
-          {isOpen ? <X className="size-5" /> : <Menu className="size-5" />}
-        </button>
+        {/* Mobile Actions (Theme Toggle + Hamburger) */}
+        <div className="flex items-center gap-2 md:hidden">
+          <ThemeToggle />
+          <button
+            type="button"
+            aria-label={isOpen ? "Close menu" : "Open menu"}
+            aria-expanded={isOpen}
+            onClick={() => setIsOpen((open) => !open)}
+            className="rounded-lg p-2 text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground"
+          >
+            {isOpen ? <X className="size-5" /> : <Menu className="size-5" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile Menu */}
@@ -90,26 +94,23 @@ export function Navbar() {
               {label}
             </Link>
           ))}
-          <div className="px-3 py-2 flex items-center justify-between border-t border-border mt-2 pt-4">
-            <span className="text-sm font-medium text-foreground/75">
-              Theme
-            </span>
-            <ThemeToggle />
+
+          <div className="mt-2 border-t border-border pt-2">
+            <Link
+              href="/login"
+              onClick={() => setIsOpen(false)}
+              className="block rounded-xl px-3 py-3 text-sm text-foreground/75 transition-colors hover:bg-foreground/5 hover:text-foreground"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/tickets"
+              onClick={() => setIsOpen(false)}
+              className="mt-2 block rounded-xl bg-foreground px-3 py-3 text-center text-sm font-medium text-background"
+            >
+              Ticket Wallet
+            </Link>
           </div>
-          <Link
-            href="/login"
-            onClick={() => setIsOpen(false)}
-            className="mt-2 rounded-xl px-3 py-3 text-sm text-foreground/75 transition-colors hover:bg-foreground/5 hover:text-foreground"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/tickets"
-            onClick={() => setIsOpen(false)}
-            className="rounded-xl bg-foreground px-3 py-3 text-center text-sm font-medium text-background"
-          >
-            Ticket Wallet
-          </Link>
         </nav>
       </div>
     </header>

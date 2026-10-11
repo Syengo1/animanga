@@ -6,7 +6,9 @@ import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
+  // CRITICAL FIX: Extract `resolvedTheme` instead of `theme`.
+  // `resolvedTheme` will always be exactly "light" or "dark", even if the user's preference is "system".
+  const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
 
   // Prevents hydration mismatch by ensuring the component only renders the icon after mounting
@@ -22,10 +24,11 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon"
       className="rounded-full w-9 h-9 transition-colors"
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      // Toggle based on the currently rendered visual state
+      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
       aria-label="Toggle theme"
     >
-      {theme === "dark" ? (
+      {resolvedTheme === "dark" ? (
         <Moon className="h-4 w-4" />
       ) : (
         <Sun className="h-4 w-4" />
