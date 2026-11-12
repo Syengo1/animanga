@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\content\controllers\discovery.controller.ts
 import { Controller, Get, Logger } from '@nestjs/common';
 import { DiscoveryEngineService } from '../services/discovery-engine.service';
 import { HomeDiscoveryResponseDto } from '../dto/discovery.dto';
@@ -9,12 +10,8 @@ export class DiscoveryController {
   constructor(private readonly discoveryEngine: DiscoveryEngineService) {}
 
   @Get('home')
-  async getHomeFeeds(): Promise<{
-    success: boolean;
-    data: HomeDiscoveryResponseDto;
-  }> {
+  async getHomeFeeds(): Promise<HomeDiscoveryResponseDto> {
     this.logger.log('Fetching unified home discovery feeds...');
-    const data = await this.discoveryEngine.getHomeDiscoveryFeeds();
-    return { success: true, data };
+    return this.discoveryEngine.getHomeDiscoveryFeeds();
   }
 }

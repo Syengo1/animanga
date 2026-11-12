@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\content\workers\content-sync.worker.ts
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
@@ -48,18 +49,14 @@ export class ContentSyncWorker extends WorkerHost {
         `Job ${job.name} failed:`,
         error instanceof Error ? error.stack : String(error),
       );
-      throw error; // Let BullMQ apply exponential backoff
+      throw error;
     }
   }
 
-  /**
-   * 1. HOT SYNC (Every 15 mins): Re-verifies anything currently airing or about to air
-   */
   private async syncHotMedia() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    // Keyset pagination to prevent memory bloat using a zero-UUID base
     let lastId = '00000000-0000-0000-0000-000000000000';
     let hasMore = true;
 
@@ -99,7 +96,6 @@ export class ContentSyncWorker extends WorkerHost {
           animeIds,
           'ANIME',
         );
-        // FIX: Passed the correct 'freshAnime' variable
         await this.mediaDataService.syncMediaBatch(freshAnime);
       }
 
@@ -113,14 +109,12 @@ export class ContentSyncWorker extends WorkerHost {
     }
   }
 
-  /**
-   * 2. PROACTIVE DISCOVERY (Every 6 hours): Finds brand new database entries from AniList
-   */
   private async discoverNewMedia() {
     const today = new Date();
     const future = new Date();
-    future.setDate(today.getDate() + 180); // Look ahead 6 months
+    future.setDate(today.getDate() + 180);
 
+    // 1. Discover upcoming Anime
     await this.mediaDataService.fetchAndSyncCandidates({
       type: 'ANIME',
       status: 'NOT_YET_RELEASED',
@@ -134,6 +128,14 @@ export class ContentSyncWorker extends WorkerHost {
       ),
       limit: 50,
       sort: ['POPULARITY_DESC'],
+    });
+
+    // 2. Discover trending & popular Manga so the Manga catalog stays fresh
+    await this.mediaDataService.fetchAndSyncCandidates({
+      type: 'MANGA',
+      isAdult: false,
+      limit: 50,
+      sort: ['TRENDING_DESC', 'POPULARITY_DESC'],
     });
   }
 }

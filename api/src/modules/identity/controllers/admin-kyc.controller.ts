@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\identity\controllers\admin-kyc.controller.ts
 import {
   Controller,
   Get,
@@ -6,21 +7,26 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  UseGuards,
+  SetMetadata,
 } from '@nestjs/common';
 import { KycService } from '../services/kyc.service';
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import { UuidSchema } from '../../../common/validation/identifiers.schema';
+import { AuthGuard } from '../../../common/guards/auth.guard';
+import { AuthorizationGuard } from '../../../common/guards/authorization.guard';
 
 const KycReviewSchema = z
   .object({
     notes: z.string().optional(),
   })
   .strict();
+
 type KycReviewInput = z.infer<typeof KycReviewSchema>;
 
-// @UseGuards(AuthGuard, AuthorizationGuard)
-// @SetMetadata('permission', 'KYC_MANAGE')
+@UseGuards(AuthGuard, AuthorizationGuard)
+@SetMetadata('permission', 'KYC_MANAGE')
 @Controller('admin/kyc/cases')
 export class AdminKycController {
   constructor(private readonly kycService: KycService) {}

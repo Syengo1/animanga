@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\integration\services\outbox.service.ts
 import {
   Injectable,
   Logger,
@@ -27,18 +28,20 @@ export class OutboxService
   private timer: NodeJS.Timeout | null = null;
   private isShuttingDown = false;
   private isPolling = false;
+  private readonly ACTIVE_POLL_MS = 2000;
+  private readonly IDLE_POLL_MS = 8000;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectQueue('payments') private readonly paymentsQueue: Queue,
     @InjectQueue('ticket-delivery') private readonly deliveryQueue: Queue,
-    @InjectQueue('email-queue') private readonly emailQueue: Queue, // <-- NEW
+    @InjectQueue('email-queue') private readonly emailQueue: Queue,
   ) {}
 
   onApplicationBootstrap() {
     const isEnabled = process.env.OUTBOX_DISPATCHER_ENABLED !== 'false';
     if (isEnabled) {
-      this.timer = setInterval(() => void this.dispatchOutboxMessages(), 2000);
+      this.scheduleNextPoll(this.ACTIVE_POLL_MS);
       this.logger.log('Centralized Transactional Outbox dispatcher started.');
     } else {
       this.logger.warn(
@@ -50,58 +53,50 @@ export class OutboxService
   onApplicationShutdown() {
     this.isShuttingDown = true;
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
     }
+  }
+
+  private scheduleNextPoll(delayMs: number) {
+    if (this.isShuttingDown) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.dispatchOutboxMessages(), delayMs);
   }
 
   async dispatchOutboxMessages(): Promise<void> {
     if (this.isShuttingDown || this.isPolling) return;
     this.isPolling = true;
+    let nextDelay = this.IDLE_POLL_MS;
 
     try {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      let messages: RawOutboxMessage[] = [];
-
-      await queryRunner.startTransaction();
-      try {
-        const result: unknown = await queryRunner.query(
-          `
-          UPDATE integration.outbox_messages
-          SET 
-            status = $1,
-            attempt_count = attempt_count + 1
-          WHERE id IN (
-            SELECT id FROM integration.outbox_messages
-            WHERE status IN ($2, $3) AND next_attempt_at <= NOW()
-            ORDER BY created_at ASC
-            LIMIT 50
-            FOR UPDATE SKIP LOCKED
-          )
-          RETURNING *;
+      // Single atomic PostgreSQL statement — no explicit multi-roundtrip transaction needed
+      const result: unknown = await this.dataSource.query(
+        `
+        UPDATE integration.outbox_messages
+        SET
+          status = $1,
+          attempt_count = attempt_count + 1
+        WHERE id IN (
+          SELECT id FROM integration.outbox_messages
+          WHERE status IN ($2, $3) AND next_attempt_at <= NOW()
+          ORDER BY created_at ASC
+          LIMIT 50
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *;
         `,
-          [OutboxStatus.PROCESSING, OutboxStatus.PENDING, OutboxStatus.FAILED],
-        );
+        [OutboxStatus.PROCESSING, OutboxStatus.PENDING, OutboxStatus.FAILED],
+      );
 
-        const rows =
-          Array.isArray(result) && Array.isArray(result[0])
-            ? result[0]
-            : result;
-        messages = rows as RawOutboxMessage[];
-
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw error;
-      } finally {
-        await queryRunner.release();
-      }
+      const rows =
+        Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result;
+      const messages = (rows as RawOutboxMessage[]) || [];
 
       if (messages.length > 0) {
+        nextDelay = this.ACTIVE_POLL_MS;
         this.logger.log(`Dispatching ${messages.length} outbox messages...`);
       }
 
-      // 2. Centralized Routing Logic
       for (const msg of messages) {
         try {
           if (msg.event_type === 'FULFILL_ORDER') {
@@ -129,7 +124,6 @@ export class OutboxService
             msg.event_type === 'USER_REGISTERED' ||
             msg.event_type === 'USER_ACTIVATED'
           ) {
-            // <-- NEW: Route Identity Events to the Email Queue
             await this.emailQueue.add(
               msg.event_type,
               {
@@ -164,9 +158,10 @@ export class OutboxService
           const nextStatus =
             attempt >= 5 ? OutboxStatus.DEAD_LETTER : OutboxStatus.FAILED;
 
+          // SECURITY FIX: Parameterized interval multiplication ($2 * INTERVAL '1 second')
           await this.dataSource.query(
-            `UPDATE integration.outbox_messages SET status = $1, next_attempt_at = NOW() + INTERVAL '${delaySeconds} seconds', last_error = $2 WHERE id = $3`,
-            [nextStatus, err.message, msg.id],
+            `UPDATE integration.outbox_messages SET status = $1, next_attempt_at = NOW() + ($2 * INTERVAL '1 second'), last_error = $3 WHERE id = $4`,
+            [nextStatus, delaySeconds, err.message, msg.id],
           );
         }
       }
@@ -177,6 +172,7 @@ export class OutboxService
       );
     } finally {
       this.isPolling = false;
+      this.scheduleNextPoll(nextDelay);
     }
   }
 }

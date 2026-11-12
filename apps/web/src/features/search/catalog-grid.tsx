@@ -1,125 +1,180 @@
+// C:\Projects\animanga-platform\apps\web\src\features\search\catalog-grid.tsx
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
-import { MediaCard } from "@/components/shared/media-card";
-// FIX: Import the locally defined CatalogPageResponse
+import { useState } from "react";
+import Link from "next/link";
+import { LayoutGrid, Grid3X3, RotateCcw, CalendarClock } from "lucide-react";
+import { MediaCard, MediaCardData } from "@/components/shared/media-card";
+import { Pagination } from "@/components/shared/pagination";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
-  catalogQueryKey,
   NormalizedCatalogQuery,
-  CatalogPageResponse,
+  buildCatalogSearchParams,
 } from "./catalog-query";
 
 interface CatalogGridProps {
-  mediaType: "ANIME" | "MANGA";
+  items: MediaCardData[];
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalItems: number;
+    limit: number;
+  };
   normalizedQuery: NormalizedCatalogQuery;
   routeType: "anime" | "manga";
 }
 
 export function CatalogGrid({
-  mediaType,
+  items,
+  pagination,
   normalizedQuery,
   routeType,
 }: CatalogGridProps) {
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const queryKey = catalogQueryKey(mediaType, normalizedQuery);
+  const [density, setDensity] = useState<"comfortable" | "compact">(
+    "comfortable",
+  );
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, status } =
-    useInfiniteQuery({
-      queryKey,
-      queryFn: async ({ pageParam }) => {
-        const baseUrl =
-          process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
-          "http://127.0.0.1:3001";
-
-        const sp = new URLSearchParams({
-          type: mediaType,
-          sort: normalizedQuery.sort,
-          limit: String(normalizedQuery.limit),
-        });
-
-        if (normalizedQuery.status) sp.set("status", normalizedQuery.status);
-        if (normalizedQuery.format) sp.set("format", normalizedQuery.format);
-        if (normalizedQuery.genre) sp.set("genre", normalizedQuery.genre);
-        if (normalizedQuery.q) sp.set("search", normalizedQuery.q);
-        if (pageParam) sp.set("cursor", pageParam);
-
-        const res = await fetch(
-          `${baseUrl}/api/v1/media/catalog?${sp.toString()}`,
-          {
-            credentials: "include",
-          },
-        );
-
-        if (!res.ok) throw new Error("Catalog fetch failed");
-
-        const json = await res.json();
-
-        // FIX: Safely unwrap the payload whether it's double-enveloped or perfectly intercepted
-        const payload = json.data?.pagination ? json.data : json.data?.data;
-
-        return payload as CatalogPageResponse;
-      },
-      initialPageParam: null as string | null,
-      getNextPageParam: (lastPage) =>
-        lastPage.pagination.nextCursor ?? undefined,
-      maxPages: 10,
+  const createPageUrl = (targetPage: number) => {
+    const sp = buildCatalogSearchParams({
+      ...normalizedQuery,
+      page: targetPage,
     });
+    const qs = sp.toString();
+    return qs ? `/search/${routeType}?${qs}` : `/search/${routeType}`;
+  };
 
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
+  if (!items || items.length === 0) {
+    const isSearchingReleasedOnly = normalizedQuery.releaseState === "RELEASED";
+    const unreleasedUrl = (() => {
+      const sp = buildCatalogSearchParams({
+        ...normalizedQuery,
+        releaseState: "UNRELEASED",
+        status: "NOT_YET_RELEASED",
+        page: 1,
+      });
+      return `/search/${routeType}?${sp.toString()}`;
+    })();
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
-          void fetchNextPage();
-        }
-      },
-      { rootMargin: "600px" },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-  const allItems = data?.pages.flatMap((page) => page.items) || [];
-
-  if (status === "success" && allItems.length === 0) {
     return (
-      <div className="py-24 text-center border border-dashed border-border rounded-2xl">
-        <p className="text-foreground/60 mb-2">
-          No {routeType} matches these filters.
-        </p>
-        <p className="text-xs text-foreground/30">
-          Adjust your criteria or reset the search query.
-        </p>
+      <div className="py-20 px-4 text-center border border-dashed border-border rounded-2xl bg-card/50 flex flex-col items-center justify-center gap-4">
+        <div className="max-w-md">
+          <p className="text-lg font-black text-foreground mb-1">
+            No {routeType} matched your current filters.
+          </p>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            {isSearchingReleasedOnly
+              ? "Unreleased titles are hidden by default so they don't mix with released media. Looking for an upcoming release?"
+              : "Try broadening your search query, removing a genre tag, or resetting your filters."}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <Link
+            href={`/search/${routeType}`}
+            className={cn(
+              buttonVariants({ variant: "default" }),
+              "h-10 px-5 rounded-xl font-bold text-xs gap-2",
+            )}
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Reset All Filters
+          </Link>
+
+          {isSearchingReleasedOnly && (
+            <Link
+              href={unreleasedUrl}
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "h-10 px-5 rounded-xl font-bold text-xs gap-2 bg-card hover:bg-accent",
+              )}
+            >
+              <CalendarClock className="w-3.5 h-3.5 text-amber-500" />
+              Search Unreleased {routeType === "anime" ? "Anime" : "Manga"}
+            </Link>
+          )}
+        </div>
       </div>
     );
   }
 
+  const startIdx = (pagination.currentPage - 1) * pagination.limit + 1;
+  const endIdx = Math.min(
+    pagination.currentPage * pagination.limit,
+    pagination.totalItems,
+  );
+
   return (
-    <div className="flex flex-col gap-8 w-full">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 sm:gap-6">
-        {allItems.map((item, idx) => (
+    <div className="flex flex-col w-full">
+      {/* Subtle Sub-bar: Showing X-Y of Z + Grid Density Toggle */}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs font-semibold text-muted-foreground">
+          Showing{" "}
+          <span className="font-bold text-foreground">
+            {startIdx}–{endIdx}
+          </span>{" "}
+          of{" "}
+          <span className="font-bold text-foreground">
+            {pagination.totalItems.toLocaleString()}
+          </span>{" "}
+          results
+        </p>
+
+        <div className="hidden sm:flex items-center gap-1 p-1 rounded-lg bg-secondary border border-border">
+          <button
+            type="button"
+            onClick={() => setDensity("comfortable")}
+            aria-label="Comfortable grid view"
+            className={cn(
+              "p-1.5 rounded-md transition-colors cursor-pointer",
+              density === "comfortable"
+                ? "bg-card text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setDensity("compact")}
+            aria-label="Compact grid view"
+            className={cn(
+              "p-1.5 rounded-md transition-colors cursor-pointer",
+              density === "compact"
+                ? "bg-card text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Grid3X3 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Finite Results Grid */}
+      <div
+        className={cn(
+          "grid gap-4 sm:gap-5",
+          density === "comfortable"
+            ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
+            : "grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8",
+        )}
+      >
+        {items.map((item, idx) => (
           <MediaCard
             key={item.id}
             media={item}
-            type={routeType}
+            mediaType={routeType}
             priority={idx < 8}
           />
         ))}
       </div>
 
-      <div
-        ref={sentinelRef}
-        className="py-6 flex justify-center w-full min-h-[80px]"
-      >
-        {isFetchingNextPage && (
-          <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        )}
-      </div>
+      {/* Numbered Pagination with Next/Prev Buttons */}
+      <Pagination
+        currentPage={pagination.currentPage}
+        totalPages={pagination.totalPages}
+        createPageUrl={createPageUrl}
+      />
     </div>
   );
 }

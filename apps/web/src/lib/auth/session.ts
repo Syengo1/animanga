@@ -1,7 +1,9 @@
+// C:\Projects\animanga-platform\apps\web\src\lib\auth\session.ts
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-export const AUTH_COOKIE_NAME = "animanga_access_token";
+export const PROD_AUTH_COOKIE_NAME = "__Host-animanga_session";
+export const DEV_AUTH_COOKIE_NAME = "animanga_session";
 
 export interface SessionUser {
   id: string;
@@ -10,112 +12,63 @@ export interface SessionUser {
   permissions: string[];
 }
 
-export interface SessionPayload extends SessionUser {
-  iat: number;
-  exp: number;
-  iss?: string;
-}
-
-/**
- * Safely decodes a Base64Url string (standard for JWT payloads)
- * without relying on external dependencies.
- */
-function decodeBase64Url(str: string): string {
-  // Pad the base64url string to be a multiple of 4
-  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
-  while (base64.length % 4) {
-    base64 += "=";
-  }
-  return Buffer.from(base64, "base64").toString("utf-8");
-}
-
-/**
- * Reads and parses the JWT from the HttpOnly cookie.
- * NOTE: This relies on the backend to verify the signature.
- * This merely decodes the payload for frontend UI/routing logic.
- */
-export async function getSession(): Promise<SessionPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-
-  if (!token) {
+export async function getSessionToken(): Promise<{
+  name: string;
+  value: string;
+} | null> {
+  try {
+    const cookieStore = await cookies();
+    const prodCookie = cookieStore.get(PROD_AUTH_COOKIE_NAME);
+    if (prodCookie?.value) {
+      return { name: PROD_AUTH_COOKIE_NAME, value: prodCookie.value };
+    }
+    const devCookie = cookieStore.get(DEV_AUTH_COOKIE_NAME);
+    if (devCookie?.value) {
+      return { name: DEV_AUTH_COOKIE_NAME, value: devCookie.value };
+    }
+    return null;
+  } catch {
     return null;
   }
+}
+
+export async function getCurrentUser(): Promise<SessionUser | null> {
+  const token = await getSessionToken();
+  if (!token) return null;
 
   try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
+    const baseUrl =
+      process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
+      "http://127.0.0.1:3001";
 
-    const payloadString = decodeBase64Url(parts[1]);
-    const payload = JSON.parse(payloadString) as SessionPayload;
+    const res = await fetch(`${baseUrl}/api/v1/users/me`, {
+      headers: {
+        Cookie: `${token.name}=${token.value}`,
+        Authorization: `Bearer ${token.value}`,
+      },
+      cache: "no-store",
+    });
 
-    // Check expiration (exp is in seconds, Date.now() is in ms)
-    if (payload.exp && payload.exp * 1000 < Date.now()) {
-      return null;
-    }
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json?.data || json;
+    if (!data?.id) return null;
 
-    return payload;
-  } catch (error) {
-    console.error("Failed to parse session token:", error);
+    return {
+      id: data.id,
+      email: data.email || "",
+      roles: data.roles || [],
+      permissions: data.permissions || [],
+    };
+  } catch {
     return null;
   }
 }
 
-/**
- * Retrieves just the user object from the current session.
- */
-export async function getCurrentUser(): Promise<SessionUser | null> {
-  const session = await getSession();
-  if (!session) return null;
-
-  return {
-    id: session.id,
-    email: session.email,
-    roles: session.roles || [],
-    permissions: session.permissions || [],
-  };
-}
-
-/**
- * Route Guard: Requires an active session.
- * Redirects to the login page if unauthenticated.
- */
-export async function requireSession(): Promise<SessionPayload> {
-  const session = await getSession();
-
-  if (!session) {
+export async function requireSession(): Promise<SessionUser> {
+  const user = await getCurrentUser();
+  if (!user) {
     redirect("/login");
   }
-
-  return session;
-}
-
-/**
- * Route Guard: Requires the user to have a specific role.
- * Redirects to the customer dashboard if unauthorized.
- */
-export async function requireRole(role: string): Promise<SessionPayload> {
-  const session = await requireSession();
-
-  if (!session.roles?.includes(role)) {
-    redirect("/dashboard");
-  }
-
-  return session;
-}
-
-/**
- * Route Guard: Requires the user to have a specific permission.
- * Redirects to the customer dashboard if unauthorized.
- */
-export async function requirePermission(
-  permission: string,
-): Promise<SessionPayload> {
-  const session = await requireSession();
-
-  if (!session.permissions?.includes(permission)) {
-    redirect("/dashboard");
-  }
-
-  return session;
+  return user;
 }

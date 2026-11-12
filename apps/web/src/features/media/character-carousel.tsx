@@ -1,12 +1,14 @@
+// C:\Projects\animanga-platform\apps\web\src\features\media\character-carousel.tsx
 "use client";
 
 import { useRef } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { MediaCharacterDto } from "@/lib/api/types/media";
 
 interface CharacterCarouselProps {
-  characters: any[];
+  characters: MediaCharacterDto[];
 }
 
 export function CharacterCarousel({ characters }: CharacterCarouselProps) {
@@ -25,56 +27,57 @@ export function CharacterCarousel({ characters }: CharacterCarouselProps) {
 
   return (
     <div className="relative group/carousel w-full">
-      {/* Navigation Buttons (Hidden on mobile, appear on hover for desktop) */}
       <Button
-        variant="ghost"
+        variant="outline"
         size="icon"
+        aria-label="Scroll characters left"
         onClick={() => scroll("left")}
-        className="absolute -left-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-background/80 border border-border opacity-0 md:group-hover:opacity-100 transition-opacity disabled:opacity-0"
+        className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-card/90 border border-border shadow-md opacity-0 md:group-hover/carousel:opacity-100 transition-opacity"
       >
-        <ChevronLeft className="w-5 h-5 text-foreground" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => scroll("right")}
-        className="absolute -right-4 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-background/80 border border-border opacity-0 md:group-hover:opacity-100 transition-opacity"
-      >
-        <ChevronRight className="w-5 h-5 text-foreground" />
+        <ChevronLeft className="w-4 h-4 text-foreground" />
       </Button>
 
-      {/* Scrolling Container */}
+      <Button
+        variant="outline"
+        size="icon"
+        aria-label="Scroll characters right"
+        onClick={() => scroll("right")}
+        className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-card/90 border border-border shadow-md opacity-0 md:group-hover/carousel:opacity-100 transition-opacity"
+      >
+        <ChevronRight className="w-4 h-4 text-foreground" />
+      </Button>
+
       <div
         ref={scrollContainerRef}
-        className="flex gap-4 overflow-x-auto snap-x snap-mandatory no-scrollbar pb-4"
+        className="flex gap-3.5 overflow-x-auto snap-x snap-mandatory no-scrollbar pb-2"
       >
         {characters.map((char) => {
-          const va = char.voiceActors?.[0]; // Grab the primary voice actor
+          const va = char.voiceActors?.[0];
           return (
             <div
               key={char.id}
-              className="shrink-0 snap-start w-[280px] md:w-[320px] h-[100px] flex bg-accent border border-border rounded-xl overflow-hidden transition-colors hover:bg-white/10 hover:border-white/20"
+              className="shrink-0 snap-start w-[280px] md:w-[320px] h-[96px] flex bg-card border border-border rounded-xl overflow-hidden shadow-sm transition-all hover:border-primary/40 hover:shadow-md"
             >
               {/* Left Side: Character */}
               <div className="flex-1 flex h-full min-w-0">
-                <div className="w-[70px] h-full shrink-0 bg-background/50 flex items-center justify-center">
+                <div className="w-[68px] h-full shrink-0 bg-muted flex items-center justify-center relative">
                   {char.image ? (
                     <Image
                       src={char.image}
                       alt={char.name}
-                      width={70}
-                      height={100}
+                      width={68}
+                      height={96}
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <User className="w-6 h-6 text-foreground/20" />
+                    <User className="w-5 h-5 text-muted-foreground" />
                   )}
                 </div>
                 <div className="flex flex-col justify-between p-2.5 min-w-0">
                   <p className="text-xs md:text-sm font-bold text-foreground line-clamp-2 leading-tight">
                     {char.name}
                   </p>
-                  <p className="text-[10px] md:text-xs text-foreground/50 uppercase tracking-wider font-semibold">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">
                     {char.role}
                   </p>
                 </div>
@@ -82,25 +85,25 @@ export function CharacterCarousel({ characters }: CharacterCarouselProps) {
 
               {/* Right Side: Voice Actor */}
               {va && (
-                <div className="flex-1 flex flex-row-reverse h-full bg-background/20 min-w-0">
-                  <div className="w-[70px] h-full shrink-0 bg-background/50 flex items-center justify-center">
+                <div className="flex-1 flex flex-row-reverse h-full bg-secondary/50 min-w-0 border-l border-border">
+                  <div className="w-[68px] h-full shrink-0 bg-muted flex items-center justify-center relative">
                     {va.image ? (
                       <Image
                         src={va.image}
                         alt={va.name}
-                        width={70}
-                        height={100}
+                        width={68}
+                        height={96}
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <User className="w-6 h-6 text-foreground/20" />
+                      <User className="w-5 h-5 text-muted-foreground" />
                     )}
                   </div>
                   <div className="flex flex-col justify-between p-2.5 text-right min-w-0">
                     <p className="text-xs md:text-sm font-bold text-foreground line-clamp-2 leading-tight">
                       {va.name}
                     </p>
-                    <p className="text-[10px] md:text-xs text-foreground/50 uppercase tracking-wider font-semibold line-clamp-1">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold line-clamp-1">
                       {va.language}
                     </p>
                   </div>

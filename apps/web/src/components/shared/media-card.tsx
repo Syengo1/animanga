@@ -1,6 +1,7 @@
+// C:\Projects\animanga-platform\apps\web\src\components\shared\media-card.tsx
 import Image from "next/image";
 import Link from "next/link";
-import { Star } from "lucide-react";
+import { Star, Tv, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface MediaCardData {
@@ -20,6 +21,9 @@ export interface MediaCardData {
   colorHex?: string | null;
   status: string | null;
   format?: string | null;
+  episodes?: number | null;
+  chapters?: number | null;
+  seasonYear?: number | null;
   averageScore: number | null;
 }
 
@@ -48,47 +52,110 @@ export function MediaCard({
     media.coverImage?.extraLarge ||
     media.coverImage?.large ||
     "/placeholder.jpg";
-  const dominantColor = media.colorHex || "var(--primary)";
+  const accentColor =
+    media.colorHex || media.coverImage?.color || "var(--primary)";
+
+  const formattedScore = media.averageScore
+    ? (media.averageScore / 10).toFixed(1)
+    : null;
+
+  const subMeta =
+    activeType === "anime"
+      ? media.episodes
+        ? `${media.episodes} EPS`
+        : media.format?.replace(/_/g, " ")
+      : media.chapters
+        ? `${media.chapters} CH`
+        : media.format?.replace(/_/g, " ");
 
   return (
     <Link
-      href={`/${activeType}/${media.id}`} // FIX: Link to the canonical Animanga UUID
+      href={`/${activeType}/${media.id}`}
       prefetch={false}
       className={cn(
-        "flex flex-col gap-3 group cursor-pointer w-full",
+        "flex flex-col gap-2 group cursor-pointer w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl",
         className,
       )}
     >
-      <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-accent border border-border transition-all duration-300 group-hover:border-white/30 group-hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
-        {coverUrl !== "/placeholder.jpg" && (
+      <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-secondary border border-border shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:border-primary/50 group-hover:shadow-xl dark:group-hover:shadow-black/60">
+        {coverUrl !== "/placeholder.jpg" ? (
           <Image
             src={coverUrl}
             alt={title}
             fill
             priority={priority}
-            sizes="(max-width: 640px) 150px, (max-width: 1024px) 200px, 250px"
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
+            sizes="(max-width: 640px) 150px, (max-width: 1024px) 190px, 220px"
+            className="object-cover transition-transform duration-500 ease-out group-hover:scale-105"
           />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-        {media.averageScore && (
-          <div className="absolute top-2 left-2 bg-background/80 backdrop-blur-md px-1.5 py-0.5 rounded flex items-center gap-1 text-[10px] md:text-xs font-bold border border-border z-10">
-            <Star className="w-3 h-3 text-yellow-500 fill-current" />
-            {media.averageScore}%
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-muted text-muted-foreground text-xs font-bold p-4 text-center">
+            {title}
           </div>
         )}
+
+        {/* Top Badges: Score + Format */}
+        <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-1 z-10 pointer-events-none">
+          {formattedScore ? (
+            <div className="bg-neutral-950/80 backdrop-blur-md px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px] font-bold text-white border border-white/15 shadow-sm">
+              <Star className="w-3 h-3 text-amber-400 fill-current" />
+              <span>{formattedScore}</span>
+            </div>
+          ) : (
+            <span />
+          )}
+
+          {media.format && (
+            <div className="bg-neutral-950/75 backdrop-blur-md px-1.5 py-0.5 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-white/90 border border-white/10">
+              {activeType === "anime" ? (
+                <Tv className="w-2.5 h-2.5" />
+              ) : (
+                <BookOpen className="w-2.5 h-2.5" />
+              )}
+              <span>{String(media.format).replace(/_/g, " ")}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom Scrim & Status Pill on Hover */}
+        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-neutral-950/90 via-neutral-950/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
         {media.status && (
-          <div
-            className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded bg-background/80 backdrop-blur-md text-[10px] font-bold text-center border border-border opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10 uppercase tracking-wider"
-            style={{ color: dominantColor }}
-          >
-            {media.status.replace(/_/g, " ")}
+          <div className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded-md bg-neutral-950/85 backdrop-blur-md text-[10px] font-extrabold text-center text-white border border-white/15 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10 uppercase tracking-wider flex items-center justify-center gap-1.5">
+            <span
+              className={cn(
+                "w-1.5 h-1.5 rounded-full shrink-0",
+                media.status === "RELEASING" && "animate-pulse",
+              )}
+              style={{
+                backgroundColor:
+                  media.status === "RELEASING" ? "#22c55e" : accentColor,
+              }}
+            />
+            <span className="truncate">
+              {String(media.status).replace(/_/g, " ")}
+            </span>
+          </div>
+        )}
+
+        {/* Bottom Accent Bar */}
+        <div
+          className="absolute bottom-0 inset-x-0 h-1 opacity-85 transition-opacity group-hover:opacity-100"
+          style={{ backgroundColor: accentColor }}
+        />
+      </div>
+
+      <div className="flex flex-col gap-0.5 px-0.5">
+        <h4 className="text-xs sm:text-sm font-bold leading-snug line-clamp-2 text-foreground group-hover:text-primary transition-colors">
+          {title}
+        </h4>
+        {(subMeta || media.seasonYear) && (
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+            {subMeta && <span>{subMeta}</span>}
+            {subMeta && media.seasonYear && <span>•</span>}
+            {media.seasonYear && <span>{media.seasonYear}</span>}
           </div>
         )}
       </div>
-      <h4 className="text-sm md:text-base font-semibold leading-tight line-clamp-2 text-foreground/90 group-hover:text-primary transition-colors">
-        {title}
-      </h4>
     </Link>
   );
 }

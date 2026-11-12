@@ -1,5 +1,4 @@
 // C:\Projects\animanga-platform\api\src\modules\content\adapters\anilist\anilist.adapter.ts
-
 import { Injectable, Logger, BadGatewayException } from '@nestjs/common';
 import { z } from 'zod';
 import {
@@ -15,6 +14,7 @@ import {
 import { MediaDetailDto, MediaDetailSchema } from '../../dto/media-detail.dto';
 import { GET_MEDIA_DETAILS_QUERY } from '../../graphql/media-detail.query';
 import { AniListMedia } from './anilist.types';
+import { ContentSafetyService } from '../../services/content-safety.service';
 import {
   mapStudios,
   mapCharacters,
@@ -26,11 +26,6 @@ import {
   mapAiring,
   mapVoiceLanguages,
 } from './anilist.mappers';
-
-// ============================================================================
-// STRICT ZOD BOUNDARIES (Anti-Corruption Layer)
-// These schemas validate the raw GraphQL response before it enters our system
-// ============================================================================
 
 const AniListFuzzyDateSchema = z.object({
   year: z.number().nullable().optional(),
@@ -106,20 +101,19 @@ interface AniListGraphQLResponse<T> {
   errors?: Array<{ message: string }>;
 }
 
-// ============================================================================
-// ADAPTER IMPLEMENTATION
-// ============================================================================
-
 @Injectable()
 export class AniListAdapter implements MediaProvider {
   readonly providerName = 'ANILIST';
   private readonly logger = new Logger(AniListAdapter.name);
   private readonly apiUrl = 'https://graphql.anilist.co';
+  private readonly REQUEST_TIMEOUT_MS = 10000;
+
+  constructor(private readonly contentSafety: ContentSafetyService) {}
 
   private async fetchGraphQL<T>(
     query: string,
     variables: Record<string, unknown> = {},
-    retries = 2,
+    retries = 3,
   ): Promise<T> {
     try {
       const response = await fetch(this.apiUrl, {
@@ -127,20 +121,35 @@ export class AniListAdapter implements MediaProvider {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          'User-Agent': 'Animanga-Platform-Worker/1.0',
+          'User-Agent': 'Animanga-Platform/1.0',
         },
         body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
       });
 
-      if (response.status === 429 && retries > 0) {
-        const retryAfter = parseInt(
-          response.headers.get('Retry-After') || '5',
-          10,
-        );
+      const remaining = response.headers.get('X-RateLimit-Remaining');
+      if (remaining !== null && Number(remaining) <= 5) {
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+
+      if (
+        (response.status === 429 ||
+          response.status === 502 ||
+          response.status === 503 ||
+          response.status === 504) &&
+        retries > 0
+      ) {
+        const retryHeader = response.headers.get('Retry-After');
+        const baseWaitSec = retryHeader
+          ? parseInt(retryHeader, 10)
+          : Math.pow(2, 4 - retries);
+        const jitterMs = Math.floor(Math.random() * 500);
+        const waitMs = Math.min(baseWaitSec * 1000 + jitterMs, 30000);
+
         this.logger.warn(
-          `AniList Rate Limit hit. Waiting ${retryAfter}s before retry...`,
+          `AniList HTTP ${response.status}. Backing off for ${waitMs}ms (${retries} retries left)...`,
         );
-        await new Promise((res) => setTimeout(res, retryAfter * 1000));
+        await new Promise((res) => setTimeout(res, waitMs));
         return this.fetchGraphQL(query, variables, retries - 1);
       }
 
@@ -158,6 +167,16 @@ export class AniListAdapter implements MediaProvider {
 
       return json.data;
     } catch (error) {
+      if (
+        retries > 0 &&
+        error instanceof Error &&
+        (error.name === 'TimeoutError' || error.name === 'AbortError')
+      ) {
+        this.logger.warn(
+          `AniList request timed out. Retrying (${retries} left)...`,
+        );
+        return this.fetchGraphQL(query, variables, retries - 1);
+      }
       this.logger.error(
         `Failed to fetch from AniList: ${(error as Error).message}`,
       );
@@ -165,7 +184,6 @@ export class AniListAdapter implements MediaProvider {
     }
   }
 
-  // --- Mappers ---
   private parseFuzzyDate(
     fuzzy?: {
       year?: number | null;
@@ -182,13 +200,10 @@ export class AniListAdapter implements MediaProvider {
   private mapSeason(value?: string | null): MediaSeason {
     switch (value) {
       case 'WINTER':
-        return 'WINTER';
       case 'SPRING':
-        return 'SPRING';
       case 'SUMMER':
-        return 'SUMMER';
       case 'FALL':
-        return 'FALL';
+        return value;
       default:
         return null;
     }
@@ -197,15 +212,11 @@ export class AniListAdapter implements MediaProvider {
   private mapStatus(value?: string | null): MediaStatus {
     switch (value) {
       case 'FINISHED':
-        return 'FINISHED';
       case 'RELEASING':
-        return 'RELEASING';
       case 'NOT_YET_RELEASED':
-        return 'NOT_YET_RELEASED';
       case 'CANCELLED':
-        return 'CANCELLED';
       case 'HIATUS':
-        return 'HIATUS';
+        return value;
       default:
         return 'UNKNOWN';
     }
@@ -215,12 +226,14 @@ export class AniListAdapter implements MediaProvider {
     const parseResult = AniListMediaSchema.safeParse(rawMedia);
     if (!parseResult.success) {
       this.logger.warn(
-        `AniList validation failed for single item, skipping: ${parseResult.error.message}`,
+        `AniList validation failed for item, skipping: ${parseResult.error.message}`,
       );
       return null;
     }
 
     const media = parseResult.data;
+    const sanitized = this.contentSafety.sanitizeHtml(media.description);
+
     return {
       external: {
         provider: this.providerName,
@@ -233,7 +246,7 @@ export class AniListAdapter implements MediaProvider {
         english: media.title?.english || undefined,
         native: media.title?.native || undefined,
       },
-      synopsis: media.description || undefined,
+      synopsis: sanitized.text || undefined,
       status: this.mapStatus(media.status),
       season: this.mapSeason(media.season),
       seasonYear: media.seasonYear || undefined,
@@ -244,40 +257,38 @@ export class AniListAdapter implements MediaProvider {
         media.coverImage?.extraLarge || media.coverImage?.large || undefined,
       bannerImageUrl: media.bannerImage || undefined,
       colorHex: media.coverImage?.color || undefined,
-      episodes: media.episodes || undefined,
-      chapters: media.chapters || undefined,
-      volumes: media.volumes || undefined,
+      episodes: media.episodes ?? undefined,
+      chapters: media.chapters ?? undefined,
+      volumes: media.volumes ?? undefined,
       genres: (media.genres || []).filter((g): g is string => g !== null),
-      averageScore: media.averageScore || undefined,
-      popularity: media.popularity || undefined,
-      isAdult: media.isAdult || false,
+      averageScore: media.averageScore ?? undefined,
+      popularity: media.popularity ?? undefined,
+      isAdult: Boolean(media.isAdult),
       sourceUpdatedAt: media.updatedAt
         ? new Date(media.updatedAt * 1000)
         : undefined,
       nextAiringAt: media.nextAiringEpisode?.airingAt
         ? new Date(media.nextAiringEpisode.airingAt * 1000)
         : undefined,
-      nextAiringEpisode: media.nextAiringEpisode?.episode || undefined,
+      nextAiringEpisode: media.nextAiringEpisode?.episode ?? undefined,
     };
   }
-
-  // --- Provider Contract Implementation ---
 
   async getMediaCandidates(
     options: MediaCandidateOptions,
   ): Promise<CanonicalMedia[]> {
     const query = `
       query (
-        $page: Int, $perPage: Int, $type: MediaType, $status: MediaStatus, 
-        $statusNot: MediaStatus, $season: MediaSeason, $seasonYear: Int, 
-        $startDateGreater: FuzzyDateInt, $startDateLesser: FuzzyDateInt, 
+        $page: Int, $perPage: Int, $type: MediaType, $status: MediaStatus,
+        $statusNot: MediaStatus, $season: MediaSeason, $seasonYear: Int,
+        $startDateGreater: FuzzyDateInt, $startDateLesser: FuzzyDateInt,
         $sort: [MediaSort], $isAdult: Boolean, $search: String
       ) {
         Page(page: $page, perPage: $perPage) {
           media(
-            type: $type, status: $status, status_not: $statusNot, 
-            season: $season, seasonYear: $seasonYear, 
-            startDate_greater: $startDateGreater, startDate_lesser: $startDateLesser, 
+            type: $type, status: $status, status_not: $statusNot,
+            season: $season, seasonYear: $seasonYear,
+            startDate_greater: $startDateGreater, startDate_lesser: $startDateLesser,
             sort: $sort, isAdult: $isAdult, search: $search
           ) {
             id type format title { romaji english native } description status
@@ -293,7 +304,7 @@ export class AniListAdapter implements MediaProvider {
 
     const variables = {
       page: options.page || 1,
-      perPage: options.limit || 50,
+      perPage: Math.min(options.limit || 50, 50),
       type: options.type || 'ANIME',
       status: options.status,
       statusNot: options.statusNot,
@@ -303,7 +314,7 @@ export class AniListAdapter implements MediaProvider {
       startDateLesser: options.startDateLesser,
       sort: options.sort || ['POPULARITY_DESC'],
       isAdult: options.isAdult ?? false,
-      search: options.search,
+      search: options.search?.trim() || undefined,
     };
 
     const result = await this.fetchGraphQL<{ Page: { media: unknown[] } }>(
@@ -311,7 +322,7 @@ export class AniListAdapter implements MediaProvider {
       variables,
     );
 
-    return result.Page.media
+    return (result?.Page?.media || [])
       .map((m) => this.mapToCanonical(m))
       .filter((m): m is CanonicalMedia => m !== null);
   }
@@ -323,9 +334,9 @@ export class AniListAdapter implements MediaProvider {
       query ($page: Int, $perPage: Int, $dateGreater: Int, $dateLesser: Int, $mediaId: Int) {
         Page(page: $page, perPage: $perPage) {
           mediaTrend(
-            date_greater: $dateGreater, 
-            date_lesser: $dateLesser, 
-            mediaId: $mediaId, 
+            date_greater: $dateGreater,
+            date_lesser: $dateLesser,
+            mediaId: $mediaId,
             sort: [DATE_DESC]
           ) {
             mediaId date trending popularity inProgress releasing episode
@@ -337,22 +348,19 @@ export class AniListAdapter implements MediaProvider {
 
     const variables = {
       page: options.page || 1,
-      perPage: options.limit || 50,
+      perPage: Math.min(options.limit || 50, 50),
       dateGreater: options.dateGreater,
       dateLesser: options.dateLesser,
       mediaId: options.mediaId,
     };
 
-    // Note: Typed as `unknown[]` to enforce strict Zod validation parsing below
     const result = await this.fetchGraphQL<{ Page: { mediaTrend: unknown[] } }>(
       query,
       variables,
     );
 
-    return result.Page.mediaTrend.map((raw) => {
-      // Safely parse the unknown upstream data into a strict TypeScript object
+    return (result?.Page?.mediaTrend || []).map((raw) => {
       const parsed = AniListTrendSchema.parse(raw);
-
       return {
         mediaId: String(parsed.mediaId),
         provider: this.providerName,
@@ -360,9 +368,9 @@ export class AniListAdapter implements MediaProvider {
         trending: parsed.trending || 0,
         popularity: parsed.popularity || 0,
         inProgress: parsed.inProgress || 0,
-        releasing: parsed.releasing || false,
-        episode: parsed.episode || undefined,
-        averageScore: parsed.media?.averageScore || undefined,
+        releasing: Boolean(parsed.releasing),
+        episode: parsed.episode ?? undefined,
+        averageScore: parsed.media?.averageScore ?? undefined,
       };
     });
   }
@@ -388,21 +396,26 @@ export class AniListAdapter implements MediaProvider {
       }
     `;
 
-    const numericIds = ids
-      .map((id) => parseInt(id, 10))
-      .filter((id) => !isNaN(id));
-
-    const result = await this.fetchGraphQL<{ Page: { media: unknown[] } }>(
-      query,
-      { ids: numericIds, type },
+    const numericIds = Array.from(
+      new Set(ids.map((id) => parseInt(id, 10)).filter((id) => !isNaN(id))),
     );
 
-    return result.Page.media
-      .map((m) => this.mapToCanonical(m))
-      .filter((m): m is CanonicalMedia => m !== null);
+    const results: CanonicalMedia[] = [];
+    for (let i = 0; i < numericIds.length; i += 50) {
+      const chunk = numericIds.slice(i, i + 50);
+      const result = await this.fetchGraphQL<{ Page: { media: unknown[] } }>(
+        query,
+        { ids: chunk, type },
+      );
+      const mapped = (result?.Page?.media || [])
+        .map((m) => this.mapToCanonical(m))
+        .filter((m): m is CanonicalMedia => m !== null);
+      results.push(...mapped);
+    }
+
+    return results;
   }
 
-  // --- THE DEEP FETCH CONTRACT FOR THE MEDIA DETAIL PAGE ---
   async getMediaDetailsDeep(
     providerId: number,
     internalUuid: string,
@@ -411,7 +424,7 @@ export class AniListAdapter implements MediaProvider {
       GET_MEDIA_DETAILS_QUERY,
       { id: providerId },
     );
-    const media = result.Media;
+    const media = result?.Media;
 
     if (!media) {
       throw new Error(`Media ${providerId} not found on AniList`);
@@ -419,28 +432,27 @@ export class AniListAdapter implements MediaProvider {
 
     const displayTitle =
       media.title?.english || media.title?.romaji || 'Unknown';
-    const rawHtmlDesc = media.description || '';
-    const cleanTextDesc = rawHtmlDesc.replace(/<\/?[^>]+(>|$)/g, '');
-    const slug = displayTitle
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)+/g, '');
+    const sanitizedDesc = this.contentSafety.sanitizeHtml(media.description);
+
+    const slug =
+      displayTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)+/g, '') || `media-${providerId}`;
 
     const canonicalMapping = {
       id: internalUuid,
       providerId: String(media.id),
       provider: this.providerName,
-      type: media.type === 'MANGA' ? 'MANGA' : 'ANIME', // Normalizing upstream types
+      type: media.type === 'MANGA' ? 'MANGA' : 'ANIME',
       slug,
-
       title: {
         english: media.title?.english || null,
         romaji: media.title?.romaji || null,
         native: media.title?.native || null,
       },
       synonyms: media.synonyms || [],
-      description: { text: cleanTextDesc, html: rawHtmlDesc },
-
+      description: sanitizedDesc,
       coverImage: {
         extraLarge: media.coverImage?.extraLarge || null,
         large: media.coverImage?.large || null,
@@ -448,64 +460,56 @@ export class AniListAdapter implements MediaProvider {
       },
       bannerImage: media.bannerImage || null,
       colorHex: media.coverImage?.color || null,
-
       status: media.status || 'UNKNOWN',
       format: media.format || 'UNKNOWN',
-
       startDate: media.startDate?.year
         ? {
             year: media.startDate.year,
-            month: media.startDate.month || null,
-            day: media.startDate.day || null,
+            month: media.startDate.month ?? null,
+            day: media.startDate.day ?? null,
           }
         : null,
       endDate: media.endDate?.year
         ? {
             year: media.endDate.year,
-            month: media.endDate.month || null,
-            day: media.endDate.day || null,
+            month: media.endDate.month ?? null,
+            day: media.endDate.day ?? null,
           }
         : null,
-
       season: media.season || null,
-      seasonYear: media.seasonYear || null,
-      episodes: media.episodes || null,
-      duration: media.duration || null,
-      chapters: media.chapters || null,
-      volumes: media.volumes || null,
-
+      seasonYear: media.seasonYear ?? null,
+      episodes: media.episodes ?? null,
+      duration: media.duration ?? null,
+      chapters: media.chapters ?? null,
+      volumes: media.volumes ?? null,
       genres: media.genres || [],
       tags: mapTags(media.tags),
       source: media.source || null,
       countryOfOrigin: media.countryOfOrigin || null,
-      averageScore: media.averageScore || null,
-      popularity: media.popularity || null,
-      isAdult: media.isAdult || false,
-
-      // INJECT DERIVED INTELLIGENCE
+      averageScore: media.averageScore ?? null,
+      popularity: media.popularity ?? null,
+      isAdult: Boolean(media.isAdult),
       airing: mapAiring(media),
       voiceLanguages: mapVoiceLanguages(media.characters),
-
       trailer: media.trailer?.id
         ? {
-            id: media.trailer.id,
+            id: String(media.trailer.id),
             site: media.trailer.site,
             thumbnail: media.trailer.thumbnail || null,
           }
         : null,
-
       studios: mapStudios(media.studios),
       characters: {
         meta: {
           total: media.characters?.pageInfo?.total || 0,
-          hasMore: media.characters?.pageInfo?.hasNextPage || false,
+          hasMore: Boolean(media.characters?.pageInfo?.hasNextPage),
         },
         items: mapCharacters(media.characters),
       },
       staff: {
         meta: {
           total: media.staff?.pageInfo?.total || 0,
-          hasMore: media.staff?.pageInfo?.hasNextPage || false,
+          hasMore: Boolean(media.staff?.pageInfo?.hasNextPage),
         },
         items: mapStaff(media.staff),
       },
@@ -516,32 +520,25 @@ export class AniListAdapter implements MediaProvider {
       recommendations: {
         meta: {
           total: media.recommendations?.pageInfo?.total || 0,
-          hasMore: media.recommendations?.pageInfo?.hasNextPage || false,
+          hasMore: Boolean(media.recommendations?.pageInfo?.hasNextPage),
         },
         items: mapRecommendations(media.recommendations),
       },
-
       externalLinks: mapExternalLinks(media.externalLinks),
       viewer: null,
     };
 
-    // STAGE 3: Strict Domain Validation with Explicit 502 Exception
     const parsed = MediaDetailSchema.safeParse(canonicalMapping);
 
     if (!parsed.success) {
       this.logger.error(
         `[MediaProvider] Failed to normalize AniList media detail. providerId=${providerId}`,
       );
-
-      // Use NestJS's native BadGatewayException (HTTP 502)
       throw new BadGatewayException({
-        success: false,
-        error: {
-          code: 'MEDIA_PROVIDER_DATA_INVALID',
-          message:
-            'Media data could not be processed due to upstream contract violations.',
-          issues: parsed.error.issues,
-        },
+        code: 'MEDIA_PROVIDER_DATA_INVALID',
+        message:
+          'Media data could not be processed due to upstream contract violations.',
+        issues: parsed.error.issues,
       });
     }
 

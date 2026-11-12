@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\content\services\discovery-engine.service.ts
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
@@ -11,14 +12,13 @@ import {
   HomeDiscoveryResponseDto,
   DiscoveryFeed,
 } from '../dto/discovery.dto';
-import {
-  MediaSeason,
-  MediaCandidateOptions,
-} from '../interfaces/media-provider.interface';
+import { MediaCandidateOptions } from '../interfaces/media-provider.interface';
+import { getSeasonalContext } from '../utils/season.util';
 
 @Injectable()
 export class DiscoveryEngineService implements OnApplicationBootstrap {
   private readonly logger = new Logger(DiscoveryEngineService.name);
+  private isRefreshing = false;
 
   constructor(
     private readonly mediaDataService: MediaDataService,
@@ -29,18 +29,13 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
     private readonly editorialRepo: Repository<MediaEditorialOverride>,
   ) {}
 
-  // ==========================================================================
-  // LIFECYCLE HOOK: Forces sync on deployment/startup
-  // ==========================================================================
   onApplicationBootstrap(): void {
     this.logger.log(
       'Application bootstrap: Initiating discovery cache hydration...',
     );
-    // We intentionally do not await this here so it doesn't block the HTTP server from binding to the port.
-    // It will run silently in the background immediately after the server starts.
+
     this.refreshDiscoveryScores().catch((err: unknown) => {
       let errorMessage = 'Unknown error occurred';
-
       if (err instanceof Error) {
         errorMessage = err.stack || err.message;
       } else if (typeof err === 'string') {
@@ -65,44 +60,31 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       id: item.id,
       providerId: item.externalId,
       provider: item.provider,
-
       title: {
         english: item.titleEnglish ?? null,
         romaji: item.titleRomaji ?? null,
         native: item.titleNative ?? null,
       },
-
       coverImage: {
         extraLarge: item.coverImageUrl ?? null,
         large: item.coverImageUrl ?? null,
         color: item.colorHex ?? null,
       },
-
       bannerImage: item.bannerImageUrl ?? null,
       colorHex: item.colorHex ?? null,
-
       status: item.status ?? null,
       format: item.format ?? null,
-
       episodes: item.episodes ?? null,
       chapters: item.chapters ?? null,
       volumes: item.volumes ?? null,
-
       season: item.season ?? null,
       seasonYear: item.seasonYear ?? null,
-
       averageScore: item.averageScore ? Number(item.averageScore) : null,
       popularity: item.popularity ?? null,
-
       startDate: item.startDate?.toISOString() ?? null,
       endDate: item.endDate?.toISOString() ?? null,
     };
   }
-
-  // ==========================================================================
-  // THE READ PATH (Executed ONLY by the API Controller)
-  // Strictly reads from PostgreSQL. Zero upstream API calls.
-  // ==========================================================================
 
   async getHomeDiscoveryFeeds(): Promise<HomeDiscoveryResponseDto> {
     const generatedAt = new Date().toISOString();
@@ -112,9 +94,9 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       order: { rank: 'ASC' },
     });
 
-    // O(N) single-pass grouping for optimal read-path performance
     const groupedShelves = cachedScores.reduce(
       (acc, score) => {
+        if (!score.mediaItem) return acc;
         if (!acc[score.feedKey]) acc[score.feedKey] = [];
         acc[score.feedKey].push(this.mapToDto(score.mediaItem));
         return acc;
@@ -158,40 +140,57 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
     };
   }
 
-  // ==========================================================================
-  // THE WRITE PATH (Executed ONLY by the BullMQ Worker OR Bootstrap)
-  // Fetches, synchronizes canonical facts, calculates scores, and caches results.
-  // ==========================================================================
-
   async refreshDiscoveryScores(): Promise<void> {
+    if (this.isRefreshing) {
+      this.logger.log(
+        'Discovery refresh already in progress. Skipping overlapping run.',
+      );
+      return;
+    }
+
+    this.isRefreshing = true;
     this.logger.log('Executing sequential background discovery refresh...');
     const limit = 15;
 
-    // Isolated executions: If one feed fails (e.g., rate limits), others still update
-    const tasks = [
-      { name: 'Trending', fn: () => this.refreshTrendingThisWeek(limit) },
-      { name: 'New Releases', fn: () => this.refreshNewReleases(limit) },
-      {
-        name: 'Currently Airing',
-        fn: () => this.refreshCurrentlyAiring(limit),
-      },
-      {
-        name: 'Popular This Season',
-        fn: () => this.refreshPopularThisSeason(limit),
-      },
-      { name: 'Upcoming', fn: () => this.refreshUpcomingReleases(limit) },
-    ];
+    try {
+      const tasks = [
+        { name: 'Trending', fn: () => this.refreshTrendingThisWeek(limit) },
+        { name: 'New Releases', fn: () => this.refreshNewReleases(limit) },
+        {
+          name: 'Currently Airing',
+          fn: () => this.refreshCurrentlyAiring(limit),
+        },
+        {
+          name: 'Popular This Season',
+          fn: () => this.refreshPopularThisSeason(limit),
+        },
+        { name: 'Upcoming', fn: () => this.refreshUpcomingReleases(limit) },
+      ];
 
-    for (const task of tasks) {
-      try {
-        await task.fn();
-      } catch (error) {
-        const stackTrace = error instanceof Error ? error.stack : String(error);
-        this.logger.error(`Failed to refresh ${task.name} feed:`, stackTrace);
+      for (const task of tasks) {
+        try {
+          await task.fn();
+        } catch (error: unknown) {
+          let stackTrace = 'Unknown error';
+          if (error instanceof Error) {
+            stackTrace = error.stack ?? error.message;
+          } else if (typeof error === 'string') {
+            stackTrace = error;
+          } else {
+            try {
+              stackTrace = JSON.stringify(error);
+            } catch {
+              stackTrace = 'Un-stringifiable error object';
+            }
+          }
+          this.logger.error(`Failed to refresh ${task.name} feed:`, stackTrace);
+        }
       }
-    }
 
-    this.logger.log('Discovery cache refresh complete.');
+      this.logger.log('Discovery cache refresh complete.');
+    } finally {
+      this.isRefreshing = false;
+    }
   }
 
   private async saveScores(
@@ -199,16 +198,35 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
     algorithmVersion: string,
     items: Partial<MediaDiscoveryScore>[],
   ): Promise<void> {
-    // Wrap write in a transaction to prevent race conditions during read-path queries
+    // 1. Deduplicate by mediaItem.id so a single batch can never violate uq_media_feed
+    const seenMediaIds = new Set<string>();
+    const uniqueItems: Partial<MediaDiscoveryScore>[] = [];
+
+    for (const item of items) {
+      const mediaId = item.mediaItem?.id;
+      if (!mediaId || seenMediaIds.has(mediaId)) continue;
+      seenMediaIds.add(mediaId);
+      uniqueItems.push(item);
+    }
+
+    // 2. Serialize writes per feedKey using a Postgres transaction-level advisory lock
     await this.scoreRepo.manager.transaction(
       async (transactionalManager: EntityManager) => {
+        await transactionalManager.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`discovery_feed:${feedKey}`],
+        );
+
         await transactionalManager.delete(MediaDiscoveryScore, { feedKey });
 
-        const entities = items.map((item) =>
+        if (uniqueItems.length === 0) return;
+
+        const entities = uniqueItems.map((item, idx) =>
           transactionalManager.create(MediaDiscoveryScore, {
             feedKey,
             algorithmVersion,
             ...item,
+            rank: idx,
           }),
         );
 
@@ -216,8 +234,6 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       },
     );
   }
-
-  // --- Helper Methods ---
 
   private getFuzzyDateInt(date: Date, includeDay = true): number {
     const year = date.getFullYear();
@@ -248,8 +264,6 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
     );
   }
 
-  // --- Feed Generators ---
-
   private async refreshUpcomingReleases(limit: number): Promise<void> {
     const todayInt = this.getFuzzyDateInt(new Date(), false);
 
@@ -266,14 +280,11 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       where: { feedKey: 'UPCOMING_RELEASES' },
       relations: { mediaItem: true },
     });
-
     const overrideMap = new Map(overrides.map((o) => [o.mediaItem.id, o]));
 
     const scored = candidates.map((media) => {
       const override = overrideMap.get(media.id);
       const multiplier = override ? parseFloat(override.multiplier) : 1.0;
-
-      // Safety check: ensure startDate exists before calculating urgency
       const safeDate = media.startDate ? media.startDate : new Date();
 
       const scores = this.scoringService.calculateFinalUpcomingScore(
@@ -293,9 +304,9 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       topCandidates.map((s, index) => ({
         mediaItem: s.media,
         rawPopularity: s.media.popularity || 0,
-        popularityScore: s.popScore.toString(),
-        urgencyScore: s.urgScore.toString(),
-        finalScore: s.finalScore.toString(),
+        popularityScore: s.popScore.toFixed(4),
+        urgencyScore: s.urgScore.toFixed(4),
+        finalScore: s.finalScore.toFixed(4),
         rank: index,
       })),
     );
@@ -326,7 +337,7 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
       'NEW_RELEASES',
       {
         type: 'ANIME',
-        status: 'RELEASING', // STRICT DETERMINISM: Must be currently airing
+        status: 'RELEASING',
         isAdult: false,
         startDateGreater: pastInt,
         startDateLesser: todayInt,
@@ -349,26 +360,17 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
     );
   }
 
-  private getCurrentSeason(): { season: MediaSeason; year: number } {
-    const month = new Date().getMonth();
-    const year = new Date().getFullYear();
-    if (month >= 0 && month <= 2) return { season: 'WINTER', year };
-    if (month >= 3 && month <= 5) return { season: 'SPRING', year };
-    if (month >= 6 && month <= 8) return { season: 'SUMMER', year };
-    return { season: 'FALL', year };
-  }
-
   private async refreshPopularThisSeason(limit: number): Promise<void> {
-    const { season, year } = this.getCurrentSeason();
+    const { currentSeason, currentYear } = getSeasonalContext();
 
     await this.fetchAndSaveNativeFeed(
       'POPULAR_THIS_SEASON',
       {
         type: 'ANIME',
-        season,
-        seasonYear: year,
+        season: currentSeason,
+        seasonYear: currentYear,
         isAdult: false,
-        statusNot: 'NOT_YET_RELEASED', // <-- FIX: Strictly filters out unreleased seasonal hype
+        statusNot: 'NOT_YET_RELEASED',
         sort: ['POPULARITY_DESC'],
       },
       limit,

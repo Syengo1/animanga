@@ -1,32 +1,43 @@
+// C:\Projects\animanga-platform\api\src\modules\content\utils\season.util.ts
 import { MediaSeason } from '../interfaces/media-provider.interface';
 
-export function getSeasonalContext() {
-  const date = new Date();
-  const month = date.getMonth(); // 0-11
-  let currentYear = date.getFullYear();
+export function getSeasonalContext(referenceDate: Date = new Date()): {
+  currentSeason: Exclude<MediaSeason, null>;
+  currentYear: number;
+  nextSeason: Exclude<MediaSeason, null>;
+  nextYear: number;
+} {
+  const month = referenceDate.getUTCMonth(); // 0-11
+  const currentYear = referenceDate.getUTCFullYear();
 
-  let currentSeason: MediaSeason;
-  let nextSeason: MediaSeason;
-  let nextYear = currentYear;
-
-  if (month >= 2 && month <= 4) {
-    currentSeason = 'SPRING';
-    nextSeason = 'SUMMER';
-  } else if (month >= 5 && month <= 7) {
-    currentSeason = 'SUMMER';
-    nextSeason = 'FALL';
-  } else if (month >= 8 && month <= 10) {
-    currentSeason = 'FALL';
-    nextSeason = 'WINTER';
-    nextYear = currentYear + 1; // Fall transitions into Winter of the next year
-  } else {
-    currentSeason = 'WINTER';
-    nextSeason = 'SPRING';
-    if (month === 11) {
-      currentYear += 1;
-      nextYear += 1;
-    }
+  if (month >= 0 && month <= 2) {
+    return {
+      currentSeason: 'WINTER',
+      currentYear,
+      nextSeason: 'SPRING',
+      nextYear: currentYear,
+    };
   }
-
-  return { currentSeason, currentYear, nextSeason, nextYear };
+  if (month >= 3 && month <= 5) {
+    return {
+      currentSeason: 'SPRING',
+      currentYear,
+      nextSeason: 'SUMMER',
+      nextYear: currentYear,
+    };
+  }
+  if (month >= 6 && month <= 8) {
+    return {
+      currentSeason: 'SUMMER',
+      currentYear,
+      nextSeason: 'FALL',
+      nextYear: currentYear,
+    };
+  }
+  return {
+    currentSeason: 'FALL',
+    currentYear,
+    nextSeason: 'WINTER',
+    nextYear: currentYear + 1,
+  };
 }
