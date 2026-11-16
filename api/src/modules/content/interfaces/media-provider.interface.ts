@@ -1,5 +1,8 @@
+// C:\Projects\animanga-platform\api\src\modules\content\interfaces\media-provider.interface.ts
 export type MediaType = 'ANIME' | 'MANGA';
+
 export type MediaSeason = 'WINTER' | 'SPRING' | 'SUMMER' | 'FALL' | null;
+
 export type MediaStatus =
   | 'FINISHED'
   | 'RELEASING'
@@ -45,7 +48,7 @@ export interface CanonicalMedia {
 export interface CanonicalMediaTrend {
   mediaId: string;
   provider: string;
-  date: number; // Unix timestamp or AniList epoch date
+  date: number;
   trending: number;
   popularity: number;
   inProgress: number;
@@ -58,10 +61,16 @@ export interface MediaCandidateOptions {
   type?: MediaType;
   status?: MediaStatus;
   statusNot?: MediaStatus;
+  format?: string;
+  genres?: string[];
   season?: MediaSeason;
   seasonYear?: number;
   startDateGreater?: number; // YYYYMMDD
   startDateLesser?: number; // YYYYMMDD
+  episodesGreater?: number;
+  episodesLesser?: number;
+  chaptersGreater?: number;
+  chaptersLesser?: number;
   sort?: string[];
   isAdult?: boolean;
   search?: string;
@@ -69,9 +78,22 @@ export interface MediaCandidateOptions {
   limit?: number;
 }
 
+export interface UpstreamCatalogPageInfo {
+  total: number;
+  perPage: number;
+  currentPage: number;
+  lastPage: number;
+  hasNextPage: boolean;
+}
+
+export interface UpstreamCatalogPageResult {
+  items: CanonicalMedia[];
+  pageInfo: UpstreamCatalogPageInfo;
+}
+
 export interface MediaTrendOptions {
-  dateGreater?: number; // Unix timestamp
-  dateLesser?: number; // Unix timestamp
+  dateGreater?: number;
+  dateLesser?: number;
   mediaId?: number;
   page?: number;
   limit?: number;
@@ -80,6 +102,9 @@ export interface MediaTrendOptions {
 export interface MediaProvider {
   readonly providerName: string;
   getMediaCandidates(options: MediaCandidateOptions): Promise<CanonicalMedia[]>;
+  getMediaCatalogPage(
+    options: MediaCandidateOptions,
+  ): Promise<UpstreamCatalogPageResult>;
   getMediaTrends(options: MediaTrendOptions): Promise<CanonicalMediaTrend[]>;
   getMediaByIds(ids: string[], type?: MediaType): Promise<CanonicalMedia[]>;
 }

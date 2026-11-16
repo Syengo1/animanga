@@ -1,10 +1,11 @@
 // C:\Projects\animanga-platform\api\src\modules\content\services\media-data.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, SelectQueryBuilder } from 'typeorm';
 import {
   CanonicalMedia,
   MediaType,
+  MediaSeason,
   MediaCandidateOptions,
   MediaTrendOptions,
   CanonicalMediaTrend,
@@ -16,11 +17,25 @@ import { CatalogQueryDto, CatalogPageResponse } from '../dto/catalog.dto';
 import { MediaDetailDto, MediaDetailSchema } from '../dto/media-detail.dto';
 import { getSeasonalContext } from '../utils/season.util';
 
+interface CachedCatalogPage {
+  expiresAt: number;
+  response: CatalogPageResponse;
+}
+
 @Injectable()
 export class MediaDataService {
   private readonly logger = new Logger(MediaDataService.name);
-  private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours for finished media
-  private readonly AIRING_DETAIL_TTL_MS = 60 * 60 * 1000; // 1 hour for airing media
+  private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  private readonly AIRING_DETAIL_TTL_MS = 60 * 60 * 1000;
+  private readonly PAGE_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly MAX_CACHED_PAGES = 500;
+
+  // Deterministic Page Cache & In-Flight Request Deduplication
+  private readonly catalogPageCache = new Map<string, CachedCatalogPage>();
+  private readonly inFlightPageRequests = new Map<
+    string,
+    Promise<CatalogPageResponse>
+  >();
 
   constructor(
     private readonly primaryProvider: AniListAdapter,
@@ -31,22 +46,26 @@ export class MediaDataService {
   async syncMediaBatch(mediaList: CanonicalMedia[]): Promise<MediaItem[]> {
     if (!mediaList || mediaList.length === 0) return [];
 
+    // Preserve the exact incoming order for return, while deduplicating by provider:externalId
+    const orderedKeys: string[] = [];
     const uniqueMap = new Map<string, CanonicalMedia>();
-    for (const media of mediaList) {
-      uniqueMap.set(
-        `${media.external.provider}:${media.external.externalId}`,
-        media,
-      );
-    }
-    const uniqueMedia = Array.from(uniqueMap.values());
 
-    uniqueMedia.sort((a, b) =>
+    for (const media of mediaList) {
+      const key = `${media.external.provider}:${media.external.externalId}`;
+      if (!uniqueMap.has(key)) {
+        orderedKeys.push(media.external.externalId);
+      }
+      uniqueMap.set(key, media);
+    }
+
+    // Sort only the upsert payload alphabetically to prevent PostgreSQL row-lock deadlocks
+    const sortedForUpsert = Array.from(uniqueMap.values()).sort((a, b) =>
       `${a.external.provider}:${a.external.externalId}`.localeCompare(
         `${b.external.provider}:${b.external.externalId}`,
       ),
     );
 
-    const entities = uniqueMedia.map((media) =>
+    const entities = sortedForUpsert.map((media) =>
       this.mediaRepo.create({
         provider: media.external.provider,
         externalId: media.external.externalId,
@@ -81,18 +100,18 @@ export class MediaDataService {
 
     await this.mediaRepo.upsert(entities, ['provider', 'externalId']);
 
-    const externalIds = uniqueMedia.map((m) => m.external.externalId);
     const savedItems = await this.mediaRepo.find({
       where: {
         provider: this.primaryProvider.providerName,
-        externalId: In(externalIds),
+        externalId: In(orderedKeys),
       },
     });
 
-    // Preserve incoming sort order for Discovery feeds
     const orderMap = new Map(savedItems.map((item) => [item.externalId, item]));
-    return uniqueMedia
-      .map((m) => orderMap.get(m.external.externalId))
+
+    // Return entities in the EXACT upstream sort order (critical for pagination stability)
+    return orderedKeys
+      .map((extId) => orderMap.get(extId))
       .filter((item): item is MediaItem => Boolean(item));
   }
 
@@ -145,7 +164,44 @@ export class MediaDataService {
     return this.primaryProvider.getMediaTrends(options);
   }
 
-  async getCatalogPage(query: CatalogQueryDto): Promise<CatalogPageResponse> {
+  /**
+   * Maps catalog sort enum to AniList MediaSort with a mandatory 'ID_DESC'
+   * tie-breaker so tied scores/dates/popularities never repeat across pages.
+   */
+  private mapCatalogSortToAniList(
+    sort: CatalogQueryDto['sort'],
+    type: MediaType,
+  ): string[] {
+    switch (sort) {
+      case 'SCORE_DESC':
+        return ['SCORE_DESC', 'POPULARITY_DESC', 'ID_DESC'];
+      case 'START_DATE_DESC':
+        return ['START_DATE_DESC', 'POPULARITY_DESC', 'ID_DESC'];
+      case 'START_DATE_ASC':
+        return ['START_DATE', 'POPULARITY_DESC', 'ID_DESC'];
+      case 'TITLE_ASC':
+        return ['TITLE_ROMAJI', 'ID_DESC'];
+      case 'TITLE_DESC':
+        return ['TITLE_ROMAJI_DESC', 'ID_DESC'];
+      case 'EPISODES_DESC':
+        return type === 'MANGA'
+          ? ['CHAPTERS_DESC', 'POPULARITY_DESC', 'ID_DESC']
+          : ['EPISODES_DESC', 'POPULARITY_DESC', 'ID_DESC'];
+      case 'EPISODES_ASC':
+        return type === 'MANGA'
+          ? ['CHAPTERS', 'POPULARITY_DESC', 'ID_DESC']
+          : ['EPISODES', 'POPULARITY_DESC', 'ID_DESC'];
+      case 'TRENDING_DESC':
+        return ['TRENDING_DESC', 'POPULARITY_DESC', 'ID_DESC'];
+      case 'POPULARITY_DESC':
+      default:
+        return ['POPULARITY_DESC', 'ID_DESC'];
+    }
+  }
+
+  private buildCandidateOptionsFromCatalogQuery(
+    query: CatalogQueryDto,
+  ): MediaCandidateOptions {
     const {
       type,
       sort,
@@ -162,13 +218,170 @@ export class MediaDataService {
       page,
     } = query;
 
+    const { currentSeason, currentYear } = getSeasonalContext();
+    const resolvedSeason: MediaSeason =
+      season === 'CURRENT' ? currentSeason : (season as MediaSeason) || null;
+    const resolvedYear = season === 'CURRENT' ? currentYear : year;
+
+    const genresList = genre
+      ? genre
+          .split(',')
+          .map((g) => g.trim())
+          .filter(Boolean)
+      : undefined;
+
+    // If year is specified without season (and not CURRENT), bound by startDate range
+    const startDateGreater =
+      !season && resolvedYear ? resolvedYear * 10000 : undefined;
+    const startDateLesser =
+      !season && resolvedYear ? (resolvedYear + 1) * 10000 : undefined;
+
+    return {
+      type,
+      sort: this.mapCatalogSortToAniList(sort, type),
+      status:
+        status ||
+        (releaseState === 'UNRELEASED' ? 'NOT_YET_RELEASED' : undefined),
+      statusNot:
+        !status && releaseState === 'RELEASED' ? 'NOT_YET_RELEASED' : undefined,
+      format,
+      genres: genresList,
+      season: resolvedSeason,
+      seasonYear: season ? resolvedYear : undefined,
+      startDateGreater,
+      startDateLesser,
+      ...(type === 'ANIME'
+        ? {
+            episodesGreater:
+              minEpisodes !== undefined
+                ? Math.max(0, minEpisodes - 1)
+                : undefined,
+            episodesLesser:
+              maxEpisodes !== undefined ? maxEpisodes + 1 : undefined,
+          }
+        : {
+            chaptersGreater:
+              minEpisodes !== undefined
+                ? Math.max(0, minEpisodes - 1)
+                : undefined,
+            chaptersLesser:
+              maxEpisodes !== undefined ? maxEpisodes + 1 : undefined,
+          }),
+      search: search?.trim() || undefined,
+      page,
+      limit,
+      isAdult: false,
+    };
+  }
+
+  private getCatalogCacheKey(query: CatalogQueryDto): string {
+    return JSON.stringify({
+      type: query.type,
+      sort: query.sort,
+      releaseState: query.releaseState,
+      status: query.status || null,
+      season: query.season || null,
+      year: query.year || null,
+      format: query.format || null,
+      genre: query.genre || null,
+      minEpisodes: query.minEpisodes ?? null,
+      maxEpisodes: query.maxEpisodes ?? null,
+      search: query.search?.toLowerCase().trim() || null,
+      limit: query.limit,
+      page: query.page,
+    });
+  }
+
+  private setPageCache(key: string, response: CatalogPageResponse): void {
+    if (this.catalogPageCache.size >= this.MAX_CACHED_PAGES) {
+      const oldest = this.catalogPageCache.keys().next();
+      if (!oldest.done) {
+        this.catalogPageCache.delete(oldest.value);
+      }
+    }
+    this.catalogPageCache.set(key, {
+      expiresAt: Date.now() + this.PAGE_CACHE_TTL_MS,
+      response,
+    });
+  }
+
+  /**
+   * Fetches the exact page window from AniList, persists the entities to PostgreSQL
+   * in a single batch upsert, and returns the exact ordered items for that page.
+   */
+  private async fetchAndCacheCatalogPage(
+    query: CatalogQueryDto,
+    cacheKey: string,
+  ): Promise<CatalogPageResponse> {
+    const existingInFlight = this.inFlightPageRequests.get(cacheKey);
+    if (existingInFlight !== undefined) {
+      return existingInFlight;
+    }
+
+    const requestPromise = (async (): Promise<CatalogPageResponse> => {
+      try {
+        const candidateOptions =
+          this.buildCandidateOptionsFromCatalogQuery(query);
+        const upstreamPage =
+          await this.primaryProvider.getMediaCatalogPage(candidateOptions);
+
+        const syncedEntities = await this.syncMediaBatch(upstreamPage.items);
+
+        // Estimate totalItems cleanly when AniList caps its pageInfo.total at 5000
+        const totalItems = Math.max(
+          upstreamPage.pageInfo.total,
+          syncedEntities.length > 0
+            ? (query.page - 1) * query.limit + syncedEntities.length
+            : 0,
+        );
+        const totalPages = Math.max(
+          1,
+          upstreamPage.pageInfo.lastPage || Math.ceil(totalItems / query.limit),
+        );
+
+        const response: CatalogPageResponse = {
+          items: syncedEntities.map((item) => this.mapToDto(item)),
+          pagination: {
+            currentPage: query.page,
+            totalPages,
+            totalItems,
+            limit: query.limit,
+          },
+        };
+
+        this.setPageCache(cacheKey, response);
+        return response;
+      } finally {
+        this.inFlightPageRequests.delete(cacheKey);
+      }
+    })();
+
+    this.inFlightPageRequests.set(cacheKey, requestPromise);
+    return requestPromise;
+  }
+
+  private buildCatalogQueryBuilder(
+    query: CatalogQueryDto,
+  ): SelectQueryBuilder<MediaItem> {
+    const {
+      type,
+      sort,
+      releaseState,
+      status,
+      season,
+      year,
+      format,
+      genre,
+      minEpisodes,
+      maxEpisodes,
+      search,
+    } = query;
+
     const qb = this.mediaRepo.createQueryBuilder('media');
 
-    // 1. Base Constraints
     qb.where('media.mediaType = :type', { type });
     qb.andWhere('media.isAdult = false');
 
-    // 2. Release State & Status Separation (Prevents mixing released & unreleased media)
     if (status) {
       qb.andWhere('media.status = :status', { status });
     } else if (releaseState === 'UNRELEASED') {
@@ -181,7 +394,6 @@ export class MediaDataService {
       });
     }
 
-    // 3. Format & Multi-Genre Filters
     if (format) {
       qb.andWhere('media.format = :format', { format });
     }
@@ -200,7 +412,6 @@ export class MediaDataService {
       }
     }
 
-    // 4. Episode / Chapter Count Range Filters
     const countColumn = type === 'MANGA' ? 'media.chapters' : 'media.episodes';
     if (minEpisodes !== undefined) {
       qb.andWhere(`${countColumn} >= :minEpisodes`, { minEpisodes });
@@ -209,7 +420,6 @@ export class MediaDataService {
       qb.andWhere(`${countColumn} <= :maxEpisodes`, { maxEpisodes });
     }
 
-    // 5. Dynamic Seasonal & Year Filters
     if (season === 'CURRENT') {
       const { currentSeason, currentYear } = getSeasonalContext();
       qb.andWhere('media.season = :season', { season: currentSeason });
@@ -226,7 +436,6 @@ export class MediaDataService {
       }
     }
 
-    // 6. Smart Search Filter
     if (search) {
       qb.andWhere(
         '(media.titleEnglish ILIKE :search OR media.titleRomaji ILIKE :search OR media.titleNative ILIKE :search)',
@@ -234,78 +443,122 @@ export class MediaDataService {
       );
     }
 
-    // 7. Deterministic Sorting (id ASC acts as tie-breaker)
     switch (sort) {
       case 'SCORE_DESC':
-        qb.orderBy('media.averageScore', 'DESC', 'NULLS LAST').addOrderBy(
-          'media.id',
-          'ASC',
-        );
+        qb.orderBy('media.averageScore', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.popularity', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.externalId', 'DESC');
         break;
       case 'START_DATE_DESC':
-        qb.orderBy('media.startDate', 'DESC', 'NULLS LAST').addOrderBy(
-          'media.id',
-          'ASC',
-        );
+        qb.orderBy('media.startDate', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.popularity', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.externalId', 'DESC');
         break;
       case 'START_DATE_ASC':
-        qb.orderBy('media.startDate', 'ASC', 'NULLS LAST').addOrderBy(
-          'media.id',
-          'ASC',
-        );
+        qb.orderBy('media.startDate', 'ASC', 'NULLS LAST')
+          .addOrderBy('media.popularity', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.externalId', 'DESC');
         break;
       case 'TITLE_ASC':
         qb.orderBy(
-          'LOWER(COALESCE(media.titleEnglish, media.titleRomaji, media.titleNative))',
+          'LOWER(COALESCE(media.titleRomaji, media.titleEnglish, media.titleNative))',
           'ASC',
           'NULLS LAST',
-        ).addOrderBy('media.id', 'ASC');
+        ).addOrderBy('media.externalId', 'DESC');
         break;
       case 'TITLE_DESC':
         qb.orderBy(
-          'LOWER(COALESCE(media.titleEnglish, media.titleRomaji, media.titleNative))',
+          'LOWER(COALESCE(media.titleRomaji, media.titleEnglish, media.titleNative))',
           'DESC',
           'NULLS LAST',
-        ).addOrderBy('media.id', 'ASC');
+        ).addOrderBy('media.externalId', 'DESC');
         break;
       case 'EPISODES_DESC':
-        qb.orderBy(countColumn, 'DESC', 'NULLS LAST').addOrderBy(
-          'media.id',
-          'ASC',
-        );
+        qb.orderBy(countColumn, 'DESC', 'NULLS LAST')
+          .addOrderBy('media.popularity', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.externalId', 'DESC');
         break;
       case 'EPISODES_ASC':
-        qb.orderBy(countColumn, 'ASC', 'NULLS LAST').addOrderBy(
-          'media.id',
-          'ASC',
-        );
+        qb.orderBy(countColumn, 'ASC', 'NULLS LAST')
+          .addOrderBy('media.popularity', 'DESC', 'NULLS LAST')
+          .addOrderBy('media.externalId', 'DESC');
         break;
       case 'POPULARITY_DESC':
       case 'TRENDING_DESC':
       default:
         qb.orderBy('media.popularity', 'DESC', 'NULLS LAST').addOrderBy(
-          'media.id',
-          'ASC',
+          'media.externalId',
+          'DESC',
         );
         break;
     }
 
-    // 8. Finite Offset/Limit Pagination
-    const skip = (page - 1) * limit;
-    qb.skip(skip).take(limit);
+    return qb;
+  }
 
-    const [rawRecords, totalItems] = await qb.getManyAndCount();
-    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+  async getCatalogPage(query: CatalogQueryDto): Promise<CatalogPageResponse> {
+    const cacheKey = this.getCatalogCacheKey(query);
+    const cached = this.catalogPageCache.get(cacheKey);
 
-    return {
-      items: rawRecords.map((item) => this.mapToDto(item)),
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalItems,
-        limit,
-      },
-    };
+    if (cached && cached.expiresAt > Date.now()) {
+      // Trigger non-blocking background prefetch of the next page if not yet cached
+      this.prefetchNextPages(query, cached.response.pagination.totalPages);
+      return cached.response;
+    }
+
+    try {
+      const response = await this.fetchAndCacheCatalogPage(query, cacheKey);
+
+      // Non-blocking background prefetch of page + 1 so clicking "Next Page" is instant
+      this.prefetchNextPages(query, response.pagination.totalPages);
+
+      return response;
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(
+        `Upstream catalog page fetch failed (${msg}). Falling back to local PostgreSQL.`,
+      );
+
+      const { limit, page } = query;
+      const skip = (page - 1) * limit;
+      const qb = this.buildCatalogQueryBuilder(query).offset(skip).limit(limit);
+      const [rawRecords, totalItems] = await qb.getManyAndCount();
+      const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+
+      return {
+        items: rawRecords.map((item) => this.mapToDto(item)),
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalItems,
+          limit,
+        },
+      };
+    }
+  }
+
+  /**
+   * Non-blocking background prefetch of page + 1 so sequential "Next Page" navigation
+   * resolves in <1ms from memory while also hydrating PostgreSQL ahead of the user.
+   */
+  private prefetchNextPages(query: CatalogQueryDto, totalPages: number): void {
+    const nextPage = query.page + 1;
+    if (nextPage > totalPages) return;
+
+    const nextQuery: CatalogQueryDto = { ...query, page: nextPage };
+    const nextKey = this.getCatalogCacheKey(nextQuery);
+    const cachedNext = this.catalogPageCache.get(nextKey);
+
+    if (
+      (cachedNext && cachedNext.expiresAt > Date.now()) ||
+      this.inFlightPageRequests.has(nextKey)
+    ) {
+      return;
+    }
+
+    void this.fetchAndCacheCatalogPage(nextQuery, nextKey).catch(() => {
+      // Silently ignore background prefetch errors
+    });
   }
 
   async getMediaDetailsDeep(
@@ -330,7 +583,6 @@ export class MediaDataService {
 
     let media = await qb.getOne();
 
-    // Auto-hydrate if a numeric AniList ID was requested (e.g. from Relations/Recommendations) but isn't in DB yet
     if (!media && !isUuid && /^\d+$/.test(internalOrExternalId)) {
       media = await this.getMediaById(
         this.primaryProvider.providerName,
@@ -342,7 +594,6 @@ export class MediaDataService {
       return null;
     }
 
-    // 1. Check JSONB Deep Detail Cache on MediaItem.providerMetadata
     const cachedMeta = media.providerMetadata as
       | { cachedAt?: number; detail?: unknown }
       | undefined;
@@ -362,7 +613,6 @@ export class MediaDataService {
       }
     }
 
-    // 2. Fetch fresh deep details from AniList and cache in PostgreSQL JSONB
     const deepDetail = await this.primaryProvider.getMediaDetailsDeep(
       Number(media.externalId),
       media.id,

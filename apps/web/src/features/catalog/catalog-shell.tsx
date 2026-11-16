@@ -29,7 +29,7 @@ export function CatalogShell({
             </Link>
             <ChevronRight className="w-3 h-3" />
             <Link
-              href={`/${mediaType}`}
+              href={`/search/${mediaType}`}
               className="hover:text-foreground transition-colors"
             >
               {mediaType}

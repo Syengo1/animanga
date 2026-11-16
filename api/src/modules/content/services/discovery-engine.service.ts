@@ -65,6 +65,8 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
         romaji: item.titleRomaji ?? null,
         native: item.titleNative ?? null,
       },
+      synopsis: item.synopsis ?? null,
+      genres: item.genres ?? [],
       coverImage: {
         extraLarge: item.coverImageUrl ?? null,
         large: item.coverImageUrl ?? null,
@@ -165,6 +167,23 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
           fn: () => this.refreshPopularThisSeason(limit),
         },
         { name: 'Upcoming', fn: () => this.refreshUpcomingReleases(limit) },
+        {
+          name: 'Manga Catalog Hydration',
+          fn: async () => {
+            await this.mediaDataService.fetchAndSyncCandidates({
+              type: 'MANGA',
+              isAdult: false,
+              sort: ['POPULARITY_DESC'],
+              limit: 50,
+            });
+            await this.mediaDataService.fetchAndSyncCandidates({
+              type: 'MANGA',
+              isAdult: false,
+              sort: ['TRENDING_DESC'],
+              limit: 50,
+            });
+          },
+        },
       ];
 
       for (const task of tasks) {
@@ -247,15 +266,18 @@ export class DiscoveryEngineService implements OnApplicationBootstrap {
     queryCriteria: Omit<MediaCandidateOptions, 'limit'>,
     limit: number,
   ): Promise<void> {
+    // Fetch 50 items per feed so the catalog database has multiple full pages of content
     const candidates = await this.mediaDataService.fetchAndSyncCandidates({
       ...queryCriteria,
-      limit,
+      limit: 50,
     });
+
+    const topShelf = candidates.slice(0, limit);
 
     await this.saveScores(
       feedKey,
       'native-v1',
-      candidates.map((media, index) => ({
+      topShelf.map((media, index) => ({
         mediaItem: media,
         rawPopularity: media.popularity || 0,
         finalScore: (limit - index).toString(),

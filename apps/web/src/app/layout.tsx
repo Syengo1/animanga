@@ -105,7 +105,7 @@ export default async function RootLayout({
   };
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
       <body className="bg-background text-foreground antialiased transition-colors duration-300 min-h-screen flex flex-col">
         <script
           type="application/ld+json"

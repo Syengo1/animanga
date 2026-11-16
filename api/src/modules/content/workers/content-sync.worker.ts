@@ -16,6 +16,10 @@ export class ContentSyncWorker extends WorkerHost {
     process.env.ANILIST_SYNC_BATCH_SIZE || '50',
     10,
   );
+  private readonly DEEP_CRAWL_PAGES = parseInt(
+    process.env.ANILIST_DEEP_CRAWL_PAGES || '20',
+    10,
+  );
 
   constructor(
     @InjectRepository(MediaItem)
@@ -41,6 +45,9 @@ export class ContentSyncWorker extends WorkerHost {
         case 'discovery-refresh':
           await this.discoveryEngine.refreshDiscoveryScores();
           break;
+        case 'catalog-deep-crawl':
+          await this.crawlCatalogDepth();
+          break;
         default:
           this.logger.warn(`Unknown sync job: ${job.name}`);
       }
@@ -51,6 +58,64 @@ export class ContentSyncWorker extends WorkerHost {
       );
       throw error;
     }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Crawls multiple pages of Anime and Manga (Popularity, Highest Rated, and Unreleased)
+   * with polite pacing (1.2s between pages) to build a 2,000+ item local catalog.
+   */
+  private async crawlCatalogDepth(): Promise<void> {
+    this.logger.log(
+      `Starting deep catalog crawl (${this.DEEP_CRAWL_PAGES} pages per category)...`,
+    );
+
+    for (let page = 1; page <= this.DEEP_CRAWL_PAGES; page++) {
+      const animeBatch = await this.mediaDataService.fetchAndSyncCandidates({
+        type: 'ANIME',
+        statusNot: 'NOT_YET_RELEASED',
+        isAdult: false,
+        sort: ['POPULARITY_DESC', 'ID_DESC'],
+        page,
+        limit: 50,
+      });
+      await this.sleep(2200);
+
+      const mangaBatch = await this.mediaDataService.fetchAndSyncCandidates({
+        type: 'MANGA',
+        statusNot: 'NOT_YET_RELEASED',
+        isAdult: false,
+        sort: ['POPULARITY_DESC', 'ID_DESC'],
+        page,
+        limit: 50,
+      });
+      await this.sleep(2200);
+
+      this.logger.log(
+        `Deep Crawl Page ${page}/${this.DEEP_CRAWL_PAGES} synced (${animeBatch.length} Anime, ${mangaBatch.length} Manga)`,
+      );
+
+      if (animeBatch.length === 0 && mangaBatch.length === 0) {
+        break;
+      }
+    }
+
+    for (let page = 1; page <= 5; page++) {
+      await this.mediaDataService.fetchAndSyncCandidates({
+        type: 'ANIME',
+        status: 'NOT_YET_RELEASED',
+        isAdult: false,
+        sort: ['POPULARITY_DESC', 'ID_DESC'],
+        page,
+        limit: 50,
+      });
+      await this.sleep(2200);
+    }
+
+    this.logger.log('Deep catalog crawl completed successfully.');
   }
 
   private async syncHotMedia() {
@@ -114,7 +179,6 @@ export class ContentSyncWorker extends WorkerHost {
     const future = new Date();
     future.setDate(today.getDate() + 180);
 
-    // 1. Discover upcoming Anime
     await this.mediaDataService.fetchAndSyncCandidates({
       type: 'ANIME',
       status: 'NOT_YET_RELEASED',
@@ -130,7 +194,6 @@ export class ContentSyncWorker extends WorkerHost {
       sort: ['POPULARITY_DESC'],
     });
 
-    // 2. Discover trending & popular Manga so the Manga catalog stays fresh
     await this.mediaDataService.fetchAndSyncCandidates({
       type: 'MANGA',
       isAdult: false,

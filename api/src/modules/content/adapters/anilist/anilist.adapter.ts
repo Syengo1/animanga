@@ -6,6 +6,7 @@ import {
   CanonicalMedia,
   CanonicalMediaTrend,
   MediaCandidateOptions,
+  UpstreamCatalogPageResult,
   MediaTrendOptions,
   MediaType,
   MediaSeason,
@@ -274,21 +275,34 @@ export class AniListAdapter implements MediaProvider {
     };
   }
 
-  async getMediaCandidates(
+  async getMediaCatalogPage(
     options: MediaCandidateOptions,
-  ): Promise<CanonicalMedia[]> {
+  ): Promise<UpstreamCatalogPageResult> {
     const query = `
       query (
         $page: Int, $perPage: Int, $type: MediaType, $status: MediaStatus,
-        $statusNot: MediaStatus, $season: MediaSeason, $seasonYear: Int,
+        $statusNot: MediaStatus, $format: MediaFormat, $genres: [String],
+        $season: MediaSeason, $seasonYear: Int,
         $startDateGreater: FuzzyDateInt, $startDateLesser: FuzzyDateInt,
+        $episodesGreater: Int, $episodesLesser: Int,
+        $chaptersGreater: Int, $chaptersLesser: Int,
         $sort: [MediaSort], $isAdult: Boolean, $search: String
       ) {
         Page(page: $page, perPage: $perPage) {
+          pageInfo {
+            total
+            perPage
+            currentPage
+            lastPage
+            hasNextPage
+          }
           media(
             type: $type, status: $status, status_not: $statusNot,
+            format: $format, genre_in: $genres,
             season: $season, seasonYear: $seasonYear,
             startDate_greater: $startDateGreater, startDate_lesser: $startDateLesser,
+            episodes_greater: $episodesGreater, episodes_lesser: $episodesLesser,
+            chapters_greater: $chaptersGreater, chapters_lesser: $chaptersLesser,
             sort: $sort, isAdult: $isAdult, search: $search
           ) {
             id type format title { romaji english native } description status
@@ -302,29 +316,75 @@ export class AniListAdapter implements MediaProvider {
       }
     `;
 
+    const requestedPage = Math.max(1, options.page || 1);
+    const requestedLimit = Math.min(Math.max(options.limit || 24, 1), 50);
+
     const variables = {
-      page: options.page || 1,
-      perPage: Math.min(options.limit || 50, 50),
+      page: requestedPage,
+      perPage: requestedLimit,
       type: options.type || 'ANIME',
       status: options.status,
       statusNot: options.statusNot,
-      season: options.season,
+      format: options.format || undefined,
+      genres:
+        options.genres && options.genres.length > 0
+          ? options.genres
+          : undefined,
+      season: options.season || undefined,
       seasonYear: options.seasonYear,
       startDateGreater: options.startDateGreater,
       startDateLesser: options.startDateLesser,
-      sort: options.sort || ['POPULARITY_DESC'],
+      episodesGreater: options.episodesGreater,
+      episodesLesser: options.episodesLesser,
+      chaptersGreater: options.chaptersGreater,
+      chaptersLesser: options.chaptersLesser,
+      sort: options.sort || ['POPULARITY_DESC', 'ID_DESC'],
       isAdult: options.isAdult ?? false,
       search: options.search?.trim() || undefined,
     };
 
-    const result = await this.fetchGraphQL<{ Page: { media: unknown[] } }>(
-      query,
-      variables,
-    );
+    const result = await this.fetchGraphQL<{
+      Page: {
+        pageInfo?: {
+          total?: number | null;
+          perPage?: number | null;
+          currentPage?: number | null;
+          lastPage?: number | null;
+          hasNextPage?: boolean | null;
+        };
+        media: unknown[];
+      };
+    }>(query, variables);
 
-    return (result?.Page?.media || [])
+    const items = (result?.Page?.media || [])
       .map((m) => this.mapToCanonical(m))
       .filter((m): m is CanonicalMedia => m !== null);
+
+    const rawPageInfo = result?.Page?.pageInfo;
+    const total = rawPageInfo?.total ?? items.length;
+    const lastPage =
+      rawPageInfo?.lastPage ?? Math.max(1, Math.ceil(total / requestedLimit));
+
+    return {
+      items,
+      pageInfo: {
+        total,
+        perPage: rawPageInfo?.perPage ?? requestedLimit,
+        currentPage: rawPageInfo?.currentPage ?? requestedPage,
+        lastPage: Math.max(1, lastPage),
+        hasNextPage: Boolean(rawPageInfo?.hasNextPage),
+      },
+    };
+  }
+
+  async getMediaCandidates(
+    options: MediaCandidateOptions,
+  ): Promise<CanonicalMedia[]> {
+    const pageResult = await this.getMediaCatalogPage({
+      ...options,
+      limit: Math.min(options.limit || 50, 50),
+    });
+    return pageResult.items;
   }
 
   async getMediaTrends(

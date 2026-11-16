@@ -1,6 +1,7 @@
 // C:\Projects\animanga-platform\apps\web\src\features\media\media-hero.tsx
 import Image from "next/image";
-import { Star, Tv, BookOpen } from "lucide-react";
+import Link from "next/link";
+import { Star, Tv, BookOpen, Users, Calendar } from "lucide-react";
 import type { MediaDetailDto } from "@/lib/api/types/media";
 
 interface MediaHeroProps {
@@ -8,7 +9,18 @@ interface MediaHeroProps {
 }
 
 export function MediaHero({ media }: MediaHeroProps) {
-  const title = media.title?.english || media.title?.romaji || "Unknown";
+  const title =
+    media.title?.english ||
+    media.title?.romaji ||
+    media.title?.native ||
+    "Unknown";
+  const secondaryTitle =
+    media.title?.english &&
+    media.title?.romaji &&
+    media.title.english.toLowerCase() !== media.title.romaji.toLowerCase()
+      ? media.title.romaji
+      : media.title?.native;
+
   const heroImage =
     media.bannerImage || media.coverImage?.extraLarge || "/placeholder.jpg";
   const posterImage =
@@ -16,9 +28,10 @@ export function MediaHero({ media }: MediaHeroProps) {
     media.coverImage?.large ||
     "/placeholder.jpg";
   const accentColor = media.colorHex || "var(--primary)";
+  const routeType = media.type === "MANGA" ? "manga" : "anime";
 
   return (
-    <section className="relative w-full min-h-[52vh] md:min-h-[62vh] lg:min-h-[72vh] flex items-end pt-20">
+    <section className="relative w-full min-h-[52vh] md:min-h-[62vh] lg:min-h-[70vh] flex items-end pt-20">
       {/* Vibrant Full-Color Background Banner */}
       <div className="absolute inset-0 z-0 overflow-hidden bg-neutral-950">
         {heroImage !== "/placeholder.jpg" && (
@@ -56,17 +69,27 @@ export function MediaHero({ media }: MediaHeroProps) {
             className="w-12 h-1.5 rounded-full mb-4"
             style={{ backgroundColor: accentColor }}
           />
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight uppercase leading-[0.95] mb-3 text-foreground">
+
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight uppercase leading-[0.95] mb-2.5 text-foreground">
             {title}
           </h1>
-          {media.title?.native && (
-            <h2 className="text-base md:text-xl text-muted-foreground font-bold tracking-wider mb-5">
-              {media.title.native}
-            </h2>
+
+          {(secondaryTitle || media.title?.native) && (
+            <div className="flex flex-wrap items-center gap-2.5 mb-5 text-sm md:text-lg text-muted-foreground font-bold tracking-wide">
+              {secondaryTitle && <span>{secondaryTitle}</span>}
+              {secondaryTitle &&
+                media.title?.native &&
+                secondaryTitle !== media.title.native && (
+                  <>
+                    <span className="opacity-40">•</span>
+                    <span>{media.title.native}</span>
+                  </>
+                )}
+            </div>
           )}
 
           <div className="flex flex-col gap-3.5">
-            <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm font-bold tracking-wide uppercase text-foreground">
+            <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm font-bold tracking-wide uppercase text-foreground">
               {media.averageScore && (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400">
                   <Star className="w-4 h-4 fill-current" />
@@ -91,23 +114,43 @@ export function MediaHero({ media }: MediaHeroProps) {
                     className={`w-2 h-2 rounded-full ${
                       media.status === "RELEASING"
                         ? "bg-emerald-500 animate-pulse"
-                        : "bg-muted-foreground"
+                        : media.status === "NOT_YET_RELEASED"
+                          ? "bg-amber-500"
+                          : "bg-muted-foreground"
                     }`}
                   />
                   <span>{media.status.replace(/_/g, " ")}</span>
                 </div>
               )}
+
+              {media.seasonYear && (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-card/80 border border-border backdrop-blur-md">
+                  <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span>
+                    {media.season ? `${media.season} ` : ""}
+                    {media.seasonYear}
+                  </span>
+                </div>
+              )}
+
+              {media.popularity ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-card/80 border border-border backdrop-blur-md text-muted-foreground">
+                  <Users className="w-3.5 h-3.5" />
+                  <span>{media.popularity.toLocaleString()}</span>
+                </div>
+              ) : null}
             </div>
 
             {media.genres && media.genres.length > 0 && (
               <div className="flex flex-wrap gap-2 pt-1">
                 {media.genres.map((genre) => (
-                  <span
+                  <Link
                     key={genre}
-                    className="px-2.5 py-1 rounded-full text-xs font-semibold bg-secondary text-secondary-foreground border border-border"
+                    href={`/search/${routeType}?genre=${encodeURIComponent(genre)}`}
+                    className="px-3 py-1 rounded-full text-xs font-bold bg-secondary hover:bg-primary hover:text-primary-foreground text-secondary-foreground border border-border transition-colors"
                   >
                     {genre}
-                  </span>
+                  </Link>
                 ))}
               </div>
             )}

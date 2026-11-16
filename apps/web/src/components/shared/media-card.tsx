@@ -13,25 +13,35 @@ export interface MediaCardData {
     romaji: string | null;
     native: string | null;
   };
+  synopsis?: string | null;
+  genres?: string[];
   coverImage: {
     extraLarge: string | null;
     large: string | null;
     color: string | null;
   };
+  bannerImage?: string | null;
   colorHex?: string | null;
   status: string | null;
   format?: string | null;
   episodes?: number | null;
   chapters?: number | null;
+  volumes?: number | null;
+  season?: string | null;
   seasonYear?: number | null;
   averageScore: number | null;
+  popularity?: number | null;
 }
 
+const MANGA_FORMAT_SET = new Set(["MANGA", "NOVEL", "ONE_SHOT"]);
+
 interface MediaCardProps {
-  media: MediaCardData | any;
+  media: MediaCardData;
   type?: "anime" | "manga";
   mediaType?: "anime" | "manga";
   priority?: boolean;
+  badgeText?: string | null;
+  accentOverride?: string;
   className?: string;
 }
 
@@ -40,9 +50,16 @@ export function MediaCard({
   type,
   mediaType,
   priority = false,
+  badgeText,
+  accentOverride,
   className,
 }: MediaCardProps) {
-  const activeType = mediaType || type || "anime";
+  const inferredType: "anime" | "manga" =
+    media.format && MANGA_FORMAT_SET.has(media.format.toUpperCase())
+      ? "manga"
+      : "anime";
+  const activeType = mediaType || type || inferredType;
+
   const title =
     media.title?.english ||
     media.title?.romaji ||
@@ -53,7 +70,10 @@ export function MediaCard({
     media.coverImage?.large ||
     "/placeholder.jpg";
   const accentColor =
-    media.colorHex || media.coverImage?.color || "var(--primary)";
+    accentOverride ||
+    media.colorHex ||
+    media.coverImage?.color ||
+    "var(--primary)";
 
   const formattedScore = media.averageScore
     ? (media.averageScore / 10).toFixed(1)
@@ -66,7 +86,9 @@ export function MediaCard({
         : media.format?.replace(/_/g, " ")
       : media.chapters
         ? `${media.chapters} CH`
-        : media.format?.replace(/_/g, " ");
+        : media.volumes
+          ? `${media.volumes} VOL`
+          : media.format?.replace(/_/g, " ");
 
   return (
     <Link
@@ -116,9 +138,20 @@ export function MediaCard({
           )}
         </div>
 
+        {/* Optional Relation / Context Badge */}
+        {badgeText && (
+          <div className="absolute bottom-2.5 left-2 right-2 z-10 pointer-events-none group-hover:opacity-0 transition-opacity duration-200">
+            <span
+              className="inline-block px-2 py-0.5 rounded-md bg-neutral-950/85 backdrop-blur-md text-[9px] font-black uppercase tracking-widest border border-white/15 text-white truncate max-w-full"
+              style={{ borderLeftColor: accentColor, borderLeftWidth: "3px" }}
+            >
+              {badgeText}
+            </span>
+          </div>
+        )}
+
         {/* Bottom Scrim & Status Pill on Hover */}
         <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-neutral-950/90 via-neutral-950/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
         {media.status && (
           <div className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded-md bg-neutral-950/85 backdrop-blur-md text-[10px] font-extrabold text-center text-white border border-white/15 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10 uppercase tracking-wider flex items-center justify-center gap-1.5">
             <span

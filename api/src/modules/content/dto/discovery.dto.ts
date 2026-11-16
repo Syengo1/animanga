@@ -9,35 +9,29 @@ export interface MediaCardDto {
   id: string;
   providerId: string;
   provider: string;
-
   title: {
     english: string | null;
     romaji: string | null;
     native: string | null;
   };
-
+  synopsis?: string | null;
+  genres?: string[];
   coverImage: {
     extraLarge: string | null;
     large: string | null;
     color: string | null;
   };
-
   bannerImage: string | null;
   colorHex: string | null;
-
   status: string | null;
   format: string | null;
-
   episodes: number | null;
   chapters: number | null;
   volumes: number | null;
-
   season: string | null;
   seasonYear: number | null;
-
   averageScore: number | null;
   popularity: number | null;
-
   startDate: string | null;
   endDate: string | null;
 }

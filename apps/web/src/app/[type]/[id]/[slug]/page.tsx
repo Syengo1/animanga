@@ -7,8 +7,10 @@ import { MediaHero } from "@/features/media/media-hero";
 import { MediaStatusPanel } from "@/features/media/media-status-panel";
 import { CharacterCarousel } from "@/features/media/character-carousel";
 import { MediaRelations } from "@/features/media/media-relations";
+import { StaffSection } from "@/features/media/staff-section";
 import { MediaInfoSidebar } from "@/features/media/media-info-sidebar";
-import { MediaCard } from "@/components/shared/media-card";
+import { MediaRecommendations } from "@/features/media/media-recommendations";
+import { ExpandableSynopsis } from "@/components/shared/expandable-section";
 
 interface MediaPageProps {
   params: Promise<{ type: string; id: string; slug: string }>;
@@ -85,8 +87,9 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
 
   const title = media.title.english || media.title.romaji || "Unknown";
   const accentColor = media.colorHex || "var(--primary)";
+  const youtubeTrailerId =
+    media.trailer?.site?.toLowerCase() === "youtube" ? media.trailer.id : null;
 
-  // Rich Schema.org JSON-LD for Answer Engines (AEO) & Google Rich Results
   const mediaJsonLd = {
     "@context": "https://schema.org",
     "@type": media.type === "ANIME" ? "TVSeries" : "Book",
@@ -130,6 +133,7 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
 
       <div className="container mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-10">
         <div className="lg:col-span-8 flex flex-col gap-12">
+          {/* Expandable Synopsis */}
           <section>
             <h3 className="text-xl md:text-2xl font-black tracking-tight uppercase text-foreground mb-4 flex items-center gap-2.5">
               <span
@@ -138,12 +142,14 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
               />
               Synopsis
             </h3>
-            <div
-              className="prose dark:prose-invert max-w-none text-foreground/80 font-medium leading-relaxed prose-p:mb-4"
-              dangerouslySetInnerHTML={{ __html: media.description.html }}
+            <ExpandableSynopsis
+              html={media.description.html}
+              text={media.description.text}
+              accentColor={accentColor}
             />
           </section>
 
+          {/* Characters & Voice Cast with Language Switcher & Expandable Grid */}
           {media.characters.items.length > 0 && (
             <section>
               <h3 className="text-xl md:text-2xl font-black tracking-tight uppercase text-foreground mb-4 flex items-center gap-2.5">
@@ -152,11 +158,18 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
                   style={{ backgroundColor: accentColor }}
                 />
                 Characters & Voice Cast
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-secondary text-muted-foreground border border-border">
+                  {media.characters.items.length}
+                </span>
               </h3>
-              <CharacterCarousel characters={media.characters.items} />
+              <CharacterCarousel
+                characters={media.characters.items}
+                accentColor={accentColor}
+              />
             </section>
           )}
 
+          {/* Franchise & Relations with Filter Tabs & Show More */}
           {media.relations.items.length > 0 && (
             <MediaRelations
               relations={media.relations.items}
@@ -164,25 +177,41 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
             />
           )}
 
-          {media.recommendations?.items?.length > 0 && (
+          {/* Production Staff with Show More */}
+          {media.staff?.items?.length > 0 && (
+            <StaffSection staff={media.staff.items} accentColor={accentColor} />
+          )}
+
+          {/* Embedded Official Trailer */}
+          {youtubeTrailerId && (
             <section>
               <h3 className="text-xl md:text-2xl font-black tracking-tight uppercase text-foreground mb-4 flex items-center gap-2.5">
                 <span
                   className="w-2 h-7 rounded-sm"
                   style={{ backgroundColor: accentColor }}
                 />
-                Recommended For You
+                Official Trailer
               </h3>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(175px,1fr))] gap-4">
-                {media.recommendations.items.slice(0, 8).map((rec) => (
-                  <MediaCard
-                    key={rec.media.id}
-                    media={rec.media}
-                    mediaType={type as "anime" | "manga"}
-                  />
-                ))}
+              <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-border bg-neutral-950 shadow-lg">
+                <iframe
+                  src={`https://www.youtube-nocookie.com/embed/${youtubeTrailerId}`}
+                  title={`${title} Official Trailer`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  loading="lazy"
+                  className="absolute inset-0 w-full h-full"
+                />
               </div>
             </section>
+          )}
+
+          {/* Expandable Recommendations */}
+          {media.recommendations?.items?.length > 0 && (
+            <MediaRecommendations
+              recommendations={media.recommendations.items}
+              mediaType={type as "anime" | "manga"}
+              accentColor={accentColor}
+            />
           )}
         </div>
 

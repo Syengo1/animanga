@@ -1,23 +1,24 @@
 // C:\Projects\animanga-platform\apps\web\src\app\page.tsx
-import { apiClient } from "@animanga/api-client";
+import { serverFetch } from "@/lib/api/server-fetch";
 import { VoidHero } from "@/features/home/void-hero";
 import { HomeClientOrchestrator } from "@/features/home/home-client-orchestrator";
 import { NewsletterCTA } from "@/components/layout/newsletter-cta";
 
-function extractArray(obj: unknown): unknown[] {
-  if (!obj) return [];
-  if (Array.isArray(obj)) return obj;
-  if (typeof obj === "object" && obj !== null) {
-    const record = obj as Record<string, unknown>;
-    if ("data" in record) return extractArray(record.data);
-    if ("items" in record && Array.isArray(record.items)) return record.items;
-  }
+function extractCatalogItems(res: unknown): any[] {
+  if (!res || typeof res !== "object") return [];
+  const record = res as Record<string, any>;
+  const payload = record.data?.pagination
+    ? record.data
+    : record.data?.data || record;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload)) return payload;
   return [];
 }
 
 function extractDiscoveryData(obj: unknown): Record<string, any> | null {
   if (!obj || typeof obj !== "object") return null;
   const record = obj as Record<string, any>;
+
   const hasDiscoveryKeys =
     "trendingThisWeek" in record ||
     "newReleases" in record ||
@@ -31,44 +32,59 @@ function extractDiscoveryData(obj: unknown): Record<string, any> | null {
 }
 
 export default async function HomePage() {
-  let discoveryRes: any, popMangaRes: any, trendMangaRes: any;
+  const [
+    discoveryRes,
+    trendMangaRes,
+    publishingMangaRes,
+    topScoredMangaRes,
+    popMangaRes,
+  ] = await Promise.allSettled([
+    serverFetch("/api/v1/discovery/home", { next: { revalidate: 300 } }),
+    serverFetch(
+      "/api/v1/media/catalog?type=MANGA&sort=TRENDING_DESC&releaseState=RELEASED&limit=15&page=1",
+      { next: { revalidate: 300 } },
+    ),
+    serverFetch(
+      "/api/v1/media/catalog?type=MANGA&status=RELEASING&sort=POPULARITY_DESC&releaseState=RELEASED&limit=15&page=1",
+      { next: { revalidate: 300 } },
+    ),
+    serverFetch(
+      "/api/v1/media/catalog?type=MANGA&sort=SCORE_DESC&releaseState=RELEASED&limit=15&page=1",
+      { next: { revalidate: 300 } },
+    ),
+    serverFetch(
+      "/api/v1/media/catalog?type=MANGA&sort=POPULARITY_DESC&releaseState=RELEASED&limit=15&page=1",
+      { next: { revalidate: 300 } },
+    ),
+  ]);
 
-  try {
-    [discoveryRes, popMangaRes, trendMangaRes] = await Promise.all([
-      (apiClient as any).GET("/api/v1/discovery/home", {
-        next: { revalidate: 300 },
-      }),
-      apiClient.GET("/api/v1/media/search", {
-        params: {
-          query: { limit: 15, type: "MANGA", sort: "POPULARITY_DESC" } as any,
-        },
-        next: { revalidate: 300 },
-      }),
-      apiClient.GET("/api/v1/media/search", {
-        params: {
-          query: { limit: 15, type: "MANGA", sort: "TRENDING_DESC" } as any,
-        },
-        next: { revalidate: 300 },
-      }),
-    ]);
-  } catch (error) {
-    console.error(
-      "Network error fetching discovery feeds during render:",
-      error,
-    );
-  }
+  const discoveryData =
+    discoveryRes.status === "fulfilled"
+      ? extractDiscoveryData(discoveryRes.value)
+      : null;
 
-  const discoveryData = extractDiscoveryData(discoveryRes?.data);
-  const popMangaData = extractArray(popMangaRes?.data);
-  const trendMangaData = extractArray(trendMangaRes?.data);
+  const trendMangaItems =
+    trendMangaRes.status === "fulfilled"
+      ? extractCatalogItems(trendMangaRes.value)
+      : [];
+  const publishingMangaItems =
+    publishingMangaRes.status === "fulfilled"
+      ? extractCatalogItems(publishingMangaRes.value)
+      : [];
+  const topScoredMangaItems =
+    topScoredMangaRes.status === "fulfilled"
+      ? extractCatalogItems(topScoredMangaRes.value)
+      : [];
+  const popMangaItems =
+    popMangaRes.status === "fulfilled"
+      ? extractCatalogItems(popMangaRes.value)
+      : [];
 
-  // Featured items power the LiquidMediaPlayer (Trending This Week)
   const featuredAnime =
     discoveryData?.trendingThisWeek?.items ||
     discoveryData?.popularThisSeason?.items ||
     [];
 
-  // Categories below the player exclude "Trending This Week" to eliminate duplication
   const animeCategories = [];
   if (discoveryData) {
     if (discoveryData.currentlyAiring?.items?.length) {
@@ -106,28 +122,39 @@ export default async function HomePage() {
   }
 
   const animeData = {
-    error:
-      !discoveryRes || discoveryRes.error
-        ? "Failed to load discovery feeds"
-        : null,
+    error: !discoveryData ? "Failed to load discovery feeds" : null,
     featured: featuredAnime,
     categories: animeCategories,
   };
 
+  const mangaCategories = [
+    {
+      id: "publishing-m",
+      title: "Currently Publishing",
+      href: "/manga/airing",
+      items: publishingMangaItems,
+    },
+    {
+      id: "top-scored-m",
+      title: "Highest Rated Manga",
+      href: "/search/manga?sort=SCORE_DESC",
+      items: topScoredMangaItems,
+    },
+    {
+      id: "pop-m",
+      title: "All-Time Popular Manga",
+      href: "/manga/popular",
+      items: popMangaItems,
+    },
+  ].filter((c) => c.items.length > 0);
+
   const mangaData = {
     error:
-      !popMangaRes || !trendMangaRes || popMangaRes.error || trendMangaRes.error
+      trendMangaItems.length === 0 && popMangaItems.length === 0
         ? "Failed to load manga feeds"
         : null,
-    featured: trendMangaData.length > 0 ? trendMangaData : popMangaData,
-    categories: [
-      {
-        id: "pop-m",
-        title: "All-Time Popular Manga",
-        href: "/manga/popular",
-        items: popMangaData,
-      },
-    ].filter((c) => c.items?.length > 0),
+    featured: trendMangaItems.length > 0 ? trendMangaItems : popMangaItems,
+    categories: mangaCategories,
   };
 
   return (
