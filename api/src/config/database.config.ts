@@ -18,20 +18,21 @@ export default registerAs('database', (): TypeOrmModuleOptions => {
           host: process.env.DB_HOST || 'localhost',
           port: parseInt(process.env.DB_PORT || '5433', 10),
           username: process.env.DB_USER || 'animanga_admin',
-          password: process.env.DB_PASSWORD || '',
+          password: process.env.DB_PASSWORD || 'secure_password_here',
           database: process.env.DB_NAME || 'animanga_ledger',
         }),
     autoLoadEntities: true,
     // CRITICAL SECURITY FIX: Never run synchronize: true in production
     synchronize: process.env.DB_SYNCHRONIZE === 'true' && !isProd,
-    migrationsRun: false,
-    logging: isProd ? ['error'] : ['warn', 'error'],
-    maxQueryExecutionTime: 2000,
     ssl: useSsl ? { rejectUnauthorized: false } : false,
+    // Connection Pool Resilience for Supabase Supavisor (Session Mode)
     extra: {
       max: parseInt(process.env.DB_POOL_MAX || '10', 10),
-      idleTimeoutMillis: 30000,
+      min: 1,
+      idleTimeoutMillis: 20000, // Retire idle clients at 20s (before Supabase's 58s cutoff)
       connectionTimeoutMillis: 10000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     },
   };
 });

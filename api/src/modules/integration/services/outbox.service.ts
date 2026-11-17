@@ -30,6 +30,7 @@ export class OutboxService
   private isPolling = false;
   private readonly ACTIVE_POLL_MS = 2000;
   private readonly IDLE_POLL_MS = 8000;
+  private readonly PROCESSING_LEASE_SECONDS = 300; // 5-minute lease for crash recovery
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -54,6 +55,7 @@ export class OutboxService
     this.isShuttingDown = true;
     if (this.timer) {
       clearTimeout(this.timer);
+      this.timer = null;
     }
   }
 
@@ -63,34 +65,101 @@ export class OutboxService
     this.timer = setTimeout(() => void this.dispatchOutboxMessages(), delayMs);
   }
 
+  private extractErrorDetails(error: unknown): {
+    message: string;
+    stack?: string;
+  } {
+    if (error instanceof Error) {
+      return { message: error.message, stack: error.stack };
+    }
+    if (typeof error === 'string') {
+      return { message: error, stack: error };
+    }
+    try {
+      const serialized = JSON.stringify(error);
+      return { message: serialized, stack: serialized };
+    } catch {
+      return { message: 'Unknown error', stack: 'Unknown error' };
+    }
+  }
+
+  /**
+   * Detects transient socket closures caused by cloud connection poolers
+   * (e.g., Supabase Supavisor idle_session_timeout or NAT resets).
+   */
+  private isTransientConnectionError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('connection terminated unexpectedly') ||
+      msg.includes('connection reset') ||
+      msg.includes('econnreset') ||
+      msg.includes('etimedout') ||
+      msg.includes('terminating connection') ||
+      msg.includes('client has encountered a connection error') ||
+      msg.includes('sorry, too many clients already')
+    );
+  }
+
+  /**
+   * Executes a raw SQL query and transparently retries once on a fresh pool
+   * connection if a stale idle socket was dropped by the upstream pooler.
+   */
+  private async queryWithTransientRetry(
+    sql: string,
+    parameters: unknown[],
+  ): Promise<unknown> {
+    try {
+      return await this.dataSource.query(sql, parameters);
+    } catch (error: unknown) {
+      if (this.isTransientConnectionError(error)) {
+        this.logger.warn(
+          'Transient DB connection drop detected in OutboxService; retrying on a fresh pool socket...',
+        );
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return await this.dataSource.query(sql, parameters);
+      }
+      throw error;
+    }
+  }
+
   async dispatchOutboxMessages(): Promise<void> {
     if (this.isShuttingDown || this.isPolling) return;
     this.isPolling = true;
     let nextDelay = this.IDLE_POLL_MS;
 
     try {
-      // Single atomic PostgreSQL statement — no explicit multi-roundtrip transaction needed
-      const result: unknown = await this.dataSource.query(
+      const result: unknown = await this.queryWithTransientRetry(
         `
         UPDATE integration.outbox_messages
         SET
           status = $1,
-          attempt_count = attempt_count + 1
+          attempt_count = attempt_count + 1,
+          next_attempt_at = NOW() + ($4 * INTERVAL '1 second')
         WHERE id IN (
           SELECT id FROM integration.outbox_messages
-          WHERE status IN ($2, $3) AND next_attempt_at <= NOW()
+          WHERE (
+            status IN ($2, $3)
+            OR (status = $1 AND attempt_count < 5)
+          )
+          AND next_attempt_at <= NOW()
           ORDER BY created_at ASC
           LIMIT 50
           FOR UPDATE SKIP LOCKED
         )
         RETURNING *;
         `,
-        [OutboxStatus.PROCESSING, OutboxStatus.PENDING, OutboxStatus.FAILED],
+        [
+          OutboxStatus.PROCESSING,
+          OutboxStatus.PENDING,
+          OutboxStatus.FAILED,
+          this.PROCESSING_LEASE_SECONDS,
+        ],
       );
 
-      const rows =
+      const rows: unknown =
         Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result;
-      const messages = (rows as RawOutboxMessage[]) || [];
+      const messages = Array.isArray(rows) ? (rows as RawOutboxMessage[]) : [];
 
       if (messages.length > 0) {
         nextDelay = this.ACTIVE_POLL_MS;
@@ -143,14 +212,14 @@ export class OutboxService
             );
           }
 
-          await this.dataSource.query(
+          await this.queryWithTransientRetry(
             `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE id = $2`,
             [OutboxStatus.PUBLISHED, msg.id],
           );
-        } catch (dispatchError) {
-          const err = dispatchError as Error;
+        } catch (dispatchError: unknown) {
+          const { message } = this.extractErrorDetails(dispatchError);
           this.logger.error(
-            `Failed to dispatch outbox message ${msg.id}: ${err.message}`,
+            `Failed to dispatch outbox message ${msg.id}: ${message}`,
           );
 
           const attempt = msg.attempt_count;
@@ -158,18 +227,21 @@ export class OutboxService
           const nextStatus =
             attempt >= 5 ? OutboxStatus.DEAD_LETTER : OutboxStatus.FAILED;
 
-          // SECURITY FIX: Parameterized interval multiplication ($2 * INTERVAL '1 second')
-          await this.dataSource.query(
+          await this.queryWithTransientRetry(
             `UPDATE integration.outbox_messages SET status = $1, next_attempt_at = NOW() + ($2 * INTERVAL '1 second'), last_error = $3 WHERE id = $4`,
-            [nextStatus, delaySeconds, err.message, msg.id],
+            [nextStatus, delaySeconds, message, msg.id],
           );
         }
       }
-    } catch (error) {
-      this.logger.error(
-        'Outbox polling iteration failed',
-        (error as Error).stack,
-      );
+    } catch (error: unknown) {
+      if (this.isTransientConnectionError(error)) {
+        this.logger.warn(
+          'Outbox poll skipped due to temporary database reconnect; will retry on next tick.',
+        );
+      } else {
+        const { stack } = this.extractErrorDetails(error);
+        this.logger.error('Outbox polling iteration failed', stack);
+      }
     } finally {
       this.isPolling = false;
       this.scheduleNextPoll(nextDelay);
