@@ -1,14 +1,14 @@
+// C:\Projects\animanga-platform\apps\web\src\components\canvas\Scene.tsx
 "use client";
 
 import { Canvas } from "@react-three/fiber";
 import { Suspense } from "react";
 import { useTheme } from "next-themes";
+import { getThemeTokens } from "@/config/theme.config";
 
 export default function Scene({ children }: { children?: React.ReactNode }) {
   const { resolvedTheme } = useTheme();
-
-  // Dynamically match the fog color to globals.css background variables
-  const fogColor = resolvedTheme === "light" ? "#fcfcfc" : "#0c0c0c";
+  const { fogColor } = getThemeTokens(resolvedTheme);
 
   return (
     <div className="w-full h-full absolute inset-0 z-10 bg-transparent overscroll-none">

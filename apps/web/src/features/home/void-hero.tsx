@@ -1,24 +1,24 @@
+// C:\Projects\animanga-platform\apps\web\src\features\home\void-hero.tsx
 "use client";
 
 import InteractiveSphereGallery from "@/components/canvas/InteractiveSphereGallery";
 import ScrollIndicator from "@/components/canvas/ScrollIndicator";
 import { SparklesCore } from "@/components/SparklesCore";
 import { useTheme } from "next-themes";
+import { getThemeTokens } from "@/config/theme.config";
 
 export function VoidHero() {
   const { resolvedTheme } = useTheme();
-
-  // Make the sparkles a beautiful visible grey in Light Mode, and white/silver in Dark mode
-  const sparkleColor = resolvedTheme === "light" ? "#888888" : "#9ba1a5";
+  const { sparkleColor } = getThemeTokens(resolvedTheme);
 
   return (
     <section className="relative w-full h-[100svh] bg-background overflow-hidden">
       <SparklesCore
         id="void-hero-sparkles"
         background="transparent"
-        minSize={1.5}
-        maxSize={1}
-        particleDensity={0.1}
+        minSize={1.2}
+        maxSize={2.2}
+        particleDensity={0.12}
         particleSpeed={0.2}
         speed={0.5}
         particleColor={sparkleColor}

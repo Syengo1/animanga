@@ -8,103 +8,166 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-cinema: var(--cinema);
+  --color-cinema-foreground: var(--cinema-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Typography System: Change --font-primary or --font-display in :root to swap fonts globally */
+  --font-sans: var(--font-primary);
+  --font-heading: var(--font-display);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --radius-sm: calc(var(--radius) * 0.65);
+  --radius-md: calc(var(--radius) * 0.85);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) * 1.35);
+  --radius-2xl: calc(var(--radius) * 1.75);
+  --radius-3xl: calc(var(--radius) * 2.15);
+  --radius-4xl: calc(var(--radius) * 2.55);
 }
 
-/* LIGHT MODE (Default) - Crisp alabaster canvas with elevated slate surfaces */
+/* ============================================================================
+   SOFT DAYLIGHT THEME (Default) — Cornflower Mist & Soft Porcelain
+   Zero pure white (#ffffff) or pure black (#000000) to eliminate eye strain.
+   ============================================================================ */
 :root {
-  --background: oklch(0.985 0.002 260);
-  --foreground: oklch(0.145 0.015 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0.015 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0.015 260);
-  --primary: oklch(0.51 0.25 264.376);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.94 0.006 260);
-  --secondary-foreground: oklch(0.18 0.015 260);
-  --muted: oklch(0.94 0.006 260);
-  --muted-foreground: oklch(0.42 0.015 260);
-  --accent: oklch(0.945 0.008 264);
-  --accent-foreground: oklch(0.145 0.015 260);
-  --destructive: oklch(0.58 0.21 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.15 0.01 260 / 12%);
-  --input: oklch(0.15 0.01 260 / 16%);
-  --ring: oklch(0.51 0.25 264.376);
-  --radius: 0.625rem;
+  --font-primary: var(--font-alkatra), system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-alkatra), system-ui, -apple-system, sans-serif;
+
+  /* Surfaces (Analogous Cornflower Mist & Soft Alabaster-Porcelain) */
+  --background: #eef3f9;
+  --foreground: #182638;
+  --card: #f6f9fc;
+  --card-foreground: #182638;
+  --popover: #f6f9fc;
+  --popover-foreground: #182638;
+
+  /* Primary Brand: Cornflower Blue Harmony (#548ccf anchor, #3b76bc accessible daylight action) */
+  --brand-cornflower: #548ccf;
+  --primary: #3b76bc;
+  --primary-foreground: #f6f9fc;
+
+  /* Secondary & Muted Containers (Soft Powder Blue-Slate) */
+  --secondary: #e1ebf5;
+  --secondary-foreground: #1e324a;
+  --muted: #e4edf7;
+  --muted-foreground: #4f6580;
+
+  /* Accent (Interactive Cornflower Wash) */
+  --accent: #d4e3f3;
+  --accent-foreground: #182638;
+
+  /* Split-Complementary & Analogous Semantic Tokens */
+  --success: #1f8a68;
+  --success-foreground: #f6f9fc;
+  --warning: #c87d16;
+  --warning-foreground: #182638;
+  --info: #3a8fd0;
+  --destructive: #c94a4a;
+  --destructive-foreground: #f6f9fc;
+
+  /* Cinema Stage (Used for Widescreen Hero & Media Overlays instead of pure black) */
+  --cinema: #131e2e;
+  --cinema-foreground: #e6eef8;
+
+  /* Softened Cornflower-Tinted Borders & Focus Rings */
+  --border: rgba(44, 82, 130, 0.14);
+  --input: rgba(44, 82, 130, 0.18);
+  --ring: #548ccf;
+  --radius: 0.75rem;
 }
 
-/* DARK MODE - Deep obsidian void with high-contrast elevated cards */
+/* ============================================================================
+   SOFT TWILIGHT THEME (Dark Mode) — Abyssal Slate-Navy & Cornflower Blue #548ccf
+   Zero pure black (#000000) or harsh white (#ffffff) to prevent halation.
+   ============================================================================ */
 .dark {
-  --background: oklch(0.07 0.005 265);
-  --foreground: oklch(0.985 0.002 260);
-  --card: oklch(0.12 0.008 265);
-  --card-foreground: oklch(0.985 0.002 260);
-  --popover: oklch(0.12 0.008 265);
-  --popover-foreground: oklch(0.985 0.002 260);
-  --primary: oklch(0.6 0.24 264.376);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.17 0.01 265);
-  --secondary-foreground: oklch(0.985 0.002 260);
-  --muted: oklch(0.17 0.01 265);
-  --muted-foreground: oklch(0.72 0.01 260);
-  --accent: oklch(0.16 0.012 265);
-  --accent-foreground: oklch(0.985 0.002 260);
-  --destructive: oklch(0.68 0.2 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.6 0.24 264.376);
+  /* Surfaces (Deep Twilight Slate-Navy & Elevated Midnight Card) */
+  --background: #111926;
+  --foreground: #e6eef8;
+  --card: #182334;
+  --card-foreground: #e6eef8;
+  --popover: #182334;
+  --popover-foreground: #e6eef8;
+
+  /* Primary Brand: Exact Cornflower Blue #548ccf */
+  --brand-cornflower: #548ccf;
+  --primary: #548ccf;
+  --primary-foreground: #0e1622;
+
+  /* Secondary & Muted Containers (Softened Steel-Navy) */
+  --secondary: #202f45;
+  --secondary-foreground: #dce7f5;
+  --muted: #1d2b3f;
+  --muted-foreground: #94aac4;
+
+  /* Accent (Interactive Twilight Cornflower Surface) */
+  --accent: #263852;
+  --accent-foreground: #e6eef8;
+
+  /* Split-Complementary & Analogous Semantic Tokens */
+  --success: #38b28b;
+  --success-foreground: #0e1622;
+  --warning: #e5a93c;
+  --warning-foreground: #0e1622;
+  --info: #68b5e8;
+  --destructive: #e06c6c;
+  --destructive-foreground: #0e1622;
+
+  /* Cinema Stage */
+  --cinema: #0d1520;
+  --cinema-foreground: #e6eef8;
+
+  /* Softened Cornflower-Tinted Borders & Focus Rings */
+  --border: rgba(148, 170, 196, 0.15);
+  --input: rgba(148, 170, 196, 0.2);
+  --ring: #548ccf;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
   html {
     @apply font-sans scroll-smooth;
+    font-feature-settings:
+      "kern" 1,
+      "liga" 1;
   }
+
   body {
     @apply bg-background text-foreground antialiased selection:bg-primary selection:text-primary-foreground;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
   }
 }
 

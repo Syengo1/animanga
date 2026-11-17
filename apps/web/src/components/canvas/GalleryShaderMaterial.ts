@@ -1,6 +1,8 @@
+// C:\Projects\animanga-platform\apps\web\src\components\canvas\GalleryShaderMaterial.ts
 import { shaderMaterial } from "@react-three/drei";
 import { extend } from "@react-three/fiber";
 import * as THREE from "three";
+import { THEME_PALETTE } from "@/config/theme.config";
 
 export const GalleryShaderMaterial = shaderMaterial(
   {
@@ -13,7 +15,7 @@ export const GalleryShaderMaterial = shaderMaterial(
     uSizeFactorY: 0,
     uTiltAngle: 0,
     uOpacity: 1,
-    uBgColor: new THREE.Color("#000000"), // NEW: Background color uniform
+    uBgColor: new THREE.Color(THEME_PALETTE.dark.fogColor),
   },
   `
     uniform float uCurveAmountX;
@@ -24,6 +26,7 @@ export const GalleryShaderMaterial = shaderMaterial(
     uniform float uSizeFactorY;
     uniform float uTiltAngle;
     varying vec2 vUv;
+
     void main() {
       vUv = uv;
       vec3 pos = position;
@@ -40,16 +43,10 @@ export const GalleryShaderMaterial = shaderMaterial(
     uniform float uOpacity;
     uniform vec3 uBgColor;
     varying vec2 vUv;
+
     void main() {
       vec4 texColor = texture2D(uTexture, vUv);
-      
-      // CRITICAL FIX: Simulating Opacity.
-      // We mix the image with the theme's background color (White or Black).
-      // A card with 0.3 opacity becomes 70% background color and 30% image.
       vec3 finalColor = mix(uBgColor, texColor.rgb, uOpacity);
-      
-      // Force alpha to 1.0. This makes the geometry solid, 
-      // completely blocking the HTML sparkles/stars behind the cards.
       gl_FragColor = vec4(finalColor, 1.0);
     }
   `,

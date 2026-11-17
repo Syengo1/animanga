@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\apps\web\src\app\(auth)\login\page.tsx
 "use client";
 
 import { useState, Suspense } from "react";
@@ -7,7 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Flame, Eye, EyeOff, Loader2, Check, MailWarning } from "lucide-react";
-import { useGoogleLogin } from "@react-oauth/google"; // <-- NEW
+import { useGoogleLogin } from "@react-oauth/google";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,11 +39,11 @@ interface ApiLoginResponse {
   success?: boolean;
   message?: string;
   data?: {
-    id: string; // <-- Added
+    id: string;
     email: string;
     username: string;
-    roles: string[]; // <-- Added
-    permissions: string[]; // <-- Added
+    roles: string[];
+    permissions: string[];
   };
   error?: {
     code?: number | string;
@@ -55,13 +56,13 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { updateUser } = useAuth();
-
   const callbackUrl = searchParams.get("callbackUrl") || "/tickets";
+
   const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [isUnverified, setIsUnverified] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false); // <-- NEW
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const {
     register,
@@ -80,8 +81,6 @@ function LoginForm() {
     setIsUnverified(false);
 
     try {
-      // FIX: Bypass the Next.js rewrite proxy and hit the backend directly.
-      // This ensures the Set-Cookie header reaches the browser intact.
       const baseUrl =
         process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
         "http://127.0.0.1:3001";
@@ -89,7 +88,7 @@ function LoginForm() {
       const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // Remains critical for direct cross-port cookie setting
+        credentials: "include",
         body: JSON.stringify(data),
       });
 
@@ -108,6 +107,7 @@ function LoginForm() {
           setIsUnverified(true);
           throw new Error("Your account requires email verification.");
         }
+
         throw new Error(errorMessage);
       }
 
@@ -121,7 +121,6 @@ function LoginForm() {
       }
 
       setIsSuccess(true);
-
       setTimeout(() => {
         router.push(callbackUrl);
         router.refresh();
@@ -133,7 +132,6 @@ function LoginForm() {
     }
   };
 
-  // NEW: Google Auth-Code Exchange Flow
   const loginWithGoogle = useGoogleLogin({
     flow: "auth-code",
     onSuccess: async (codeResponse) => {
@@ -145,13 +143,14 @@ function LoginForm() {
         const baseUrl =
           process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
           "http://127.0.0.1:3001";
+
         const res = await fetch(`${baseUrl}/api/v1/auth/google`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include", // Mandatory for cookies
+          credentials: "include",
           body: JSON.stringify({
             code: codeResponse.code,
-            redirectUri: "postmessage", // Required by Google for popup flows
+            redirectUri: "postmessage",
           }),
         });
 
@@ -196,20 +195,20 @@ function LoginForm() {
         href="/"
         className="flex items-center gap-2 mb-[clamp(1rem,3dvh,2rem)] w-fit hover:opacity-80 transition-opacity mx-auto lg:mx-0"
       >
-        <span className="flex size-[clamp(2rem,5dvh,2.5rem)] items-center justify-center rounded-xl border border-border bg-accent backdrop-blur-md">
+        <span className="flex size-[clamp(2rem,5dvh,2.5rem)] items-center justify-center rounded-xl border border-primary/30 bg-primary/10 backdrop-blur-md">
           <Flame className="size-4 sm:size-5 text-primary" />
         </span>
-        <span className="text-[clamp(1.125rem,2.5dvh,1.25rem)] font-bold tracking-tight">
-          Animanga
+        <span className="text-[clamp(1.125rem,2.5dvh,1.25rem)] font-black tracking-tight">
+          ANI<span className="text-primary">MANGA</span>
         </span>
       </Link>
 
-      <Card className="bg-background/60 lg:bg-accent border-border backdrop-blur-2xl shadow-2xl p-[clamp(1rem,4dvh,2rem)]">
+      <Card className="bg-card/90 border-border backdrop-blur-2xl shadow-2xl p-[clamp(1rem,4dvh,2rem)]">
         <CardHeader className="p-0 pb-[clamp(0.75rem,2dvh,1.5rem)]">
-          <CardTitle className="text-[clamp(1.25rem,3dvh,1.5rem)] font-black tracking-tight">
+          <CardTitle className="text-[clamp(1.25rem,3dvh,1.5rem)] font-black tracking-tight text-card-foreground">
             Welcome back.
           </CardTitle>
-          <CardDescription className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-foreground/60">
+          <CardDescription className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-muted-foreground">
             Enter the void and access your ticket wallet.
           </CardDescription>
         </CardHeader>
@@ -219,14 +218,14 @@ function LoginForm() {
             className="flex flex-col gap-[clamp(0.75rem,2dvh,1.25rem)]"
           >
             <div className="space-y-[clamp(0.25rem,1dvh,0.375rem)]">
-              <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
+              <label className="text-[10px] sm:text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                 Email
               </label>
               <Input
                 type="email"
                 {...register("email")}
                 placeholder="goku@capsulecorp.com"
-                className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
+                className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-background/70 border-border focus-visible:ring-primary text-sm"
               />
               {errors.email && (
                 <p className="text-xs text-destructive mt-1">
@@ -234,9 +233,10 @@ function LoginForm() {
                 </p>
               )}
             </div>
+
             <div className="space-y-[clamp(0.25rem,1dvh,0.375rem)]">
               <div className="flex justify-between items-center">
-                <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
+                <label className="text-[10px] sm:text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                   Password
                 </label>
                 <Link
@@ -250,13 +250,13 @@ function LoginForm() {
                 <Input
                   type={showPassword ? "text" : "password"}
                   {...register("password")}
-                  placeholder="••••••••"
-                  className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-background/40 border-border focus-visible:ring-primary pr-10 text-sm"
+                  placeholder="••••••••••••"
+                  className="h-[clamp(2.5rem,5dvh,2.75rem)] bg-background/70 border-border focus-visible:ring-primary pr-10 text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground/50 hover:text-foreground transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (
@@ -274,18 +274,18 @@ function LoginForm() {
             </div>
 
             {isUnverified ? (
-              <div className="p-3 mt-1 text-xs sm:text-sm text-yellow-500 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex flex-col gap-2">
+              <div className="p-3 mt-1 text-xs sm:text-sm text-warning bg-warning/10 border border-warning/25 rounded-lg flex flex-col gap-2">
                 <div className="flex items-center gap-2 font-bold">
                   <MailWarning className="w-4 h-4 shrink-0" /> Account Not
                   Verified
                 </div>
-                <p className="text-yellow-500/80">
+                <p className="text-warning/85">
                   Please check your inbox for the activation link we sent when
                   you registered.
                 </p>
                 <Link
                   href="/register"
-                  className="text-left underline hover:text-yellow-400 w-fit"
+                  className="text-left underline hover:opacity-80 w-fit"
                 >
                   Check registration status
                 </Link>
@@ -304,8 +304,8 @@ function LoginForm() {
               className={cn(
                 "w-full h-[clamp(2.5rem,5dvh,2.75rem)] mt-1 font-bold text-sm sm:text-base transition-all duration-300",
                 isSuccess
-                  ? "bg-[#34A853] hover:bg-[#34A853] text-foreground"
-                  : "bg-primary hover:bg-primary/90 text-foreground",
+                  ? "bg-success hover:bg-success/90 text-success-foreground"
+                  : "bg-primary hover:bg-primary/90 text-primary-foreground",
               )}
             >
               {isSubmitting ? (
@@ -325,7 +325,7 @@ function LoginForm() {
               <span className="w-full border-t border-border" />
             </div>
             <div className="relative flex justify-center text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">
-              <span className="bg-[#100c14] lg:bg-[#151119] px-2 text-foreground/50 rounded-full">
+              <span className="bg-card px-2.5 text-muted-foreground rounded-full">
                 Or continue with
               </span>
             </div>
@@ -334,9 +334,9 @@ function LoginForm() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => loginWithGoogle()} // <-- FIX: Use the hook
+            onClick={() => loginWithGoogle()}
             disabled={isGoogleLoading || isSubmitting || isSuccess}
-            className="w-full h-[clamp(2.5rem,5dvh,2.75rem)] bg-white text-black hover:bg-white/90 border-transparent font-bold text-sm"
+            className="w-full h-[clamp(2.5rem,5dvh,2.75rem)] bg-secondary/70 text-foreground hover:bg-accent border-border font-bold text-sm"
           >
             {isGoogleLoading ? (
               <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
@@ -363,8 +363,8 @@ function LoginForm() {
             Sign in with Google
           </Button>
 
-          <p className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-center text-foreground/50 mt-[clamp(1rem,3dvh,1.5rem)]">
-            Don't have an account?{" "}
+          <p className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-center text-muted-foreground mt-[clamp(1rem,3dvh,1.5rem)]">
+            Don&apos;t have an account?{" "}
             <Link
               href="/register"
               className="text-primary hover:text-primary/80 font-bold transition-colors"
@@ -380,26 +380,26 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-foreground">
-      <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none">
-        <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-black lg:via-black/20 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-primary-foreground">
+      <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none bg-cinema">
+        <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-cinema lg:via-cinema/30 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
         <img
           src="/assets/hero/juju.avif"
           alt="Login Background"
           className="object-cover w-full h-full opacity-60 lg:opacity-80 scale-105"
         />
         <div className="hidden lg:block absolute bottom-[clamp(2rem,6dvh,3rem)] left-12 z-20 max-w-lg">
-          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-foreground tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
+          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-cinema-foreground tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
             YOUR GATEWAY TO THE CULTURE.
           </h2>
-          <p className="text-foreground/60 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
+          <p className="text-cinema-foreground/75 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
             Manage your digital tickets, track upcoming conventions, and secure
             limited edition merchandise drops.
           </p>
         </div>
       </div>
 
-      <div className="relative z-10 w-full lg:w-1/2 h-full flex flex-col items-center overflow-y-auto no-scrollbar p-4 lg:p-8 lg:bg-[#100c14]">
+      <div className="relative z-10 w-full lg:w-1/2 h-full flex flex-col items-center overflow-y-auto no-scrollbar p-4 lg:p-8 bg-background/80 lg:bg-background">
         <Suspense
           fallback={<Loader2 className="w-8 h-8 animate-spin text-primary" />}
         >

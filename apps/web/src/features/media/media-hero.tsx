@@ -33,7 +33,7 @@ export function MediaHero({ media }: MediaHeroProps) {
   return (
     <section className="relative w-full min-h-[52vh] md:min-h-[62vh] lg:min-h-[70vh] flex items-end pt-20">
       {/* Vibrant Full-Color Background Banner */}
-      <div className="absolute inset-0 z-0 overflow-hidden bg-neutral-950">
+      <div className="absolute inset-0 z-0 overflow-hidden bg-cinema">
         {heroImage !== "/placeholder.jpg" && (
           <Image
             src={heroImage}
@@ -91,7 +91,7 @@ export function MediaHero({ media }: MediaHeroProps) {
           <div className="flex flex-col gap-3.5">
             <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm font-bold tracking-wide uppercase text-foreground">
               {media.averageScore && (
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400">
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-warning/15 border border-warning/30 text-warning">
                   <Star className="w-4 h-4 fill-current" />
                   <span>{(media.averageScore / 10).toFixed(1)}</span>
                 </div>
@@ -113,9 +113,9 @@ export function MediaHero({ media }: MediaHeroProps) {
                   <span
                     className={`w-2 h-2 rounded-full ${
                       media.status === "RELEASING"
-                        ? "bg-emerald-500 animate-pulse"
+                        ? "bg-success animate-pulse"
                         : media.status === "NOT_YET_RELEASED"
-                          ? "bg-amber-500"
+                          ? "bg-warning"
                           : "bg-muted-foreground"
                     }`}
                   />

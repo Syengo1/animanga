@@ -99,7 +99,7 @@ export function MediaCard({
         className,
       )}
     >
-      <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-secondary border border-border shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:border-primary/50 group-hover:shadow-xl dark:group-hover:shadow-black/60">
+      <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-secondary border border-border shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:border-primary/50 group-hover:shadow-xl">
         {coverUrl !== "/placeholder.jpg" ? (
           <Image
             src={coverUrl}
@@ -118,8 +118,8 @@ export function MediaCard({
         {/* Top Badges: Score + Format */}
         <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-1 z-10 pointer-events-none">
           {formattedScore ? (
-            <div className="bg-neutral-950/80 backdrop-blur-md px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px] font-bold text-white border border-white/15 shadow-sm">
-              <Star className="w-3 h-3 text-amber-400 fill-current" />
+            <div className="bg-cinema/85 backdrop-blur-md px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px] font-bold text-cinema-foreground border border-cinema-foreground/15 shadow-sm">
+              <Star className="w-3 h-3 text-warning fill-current" />
               <span>{formattedScore}</span>
             </div>
           ) : (
@@ -127,11 +127,11 @@ export function MediaCard({
           )}
 
           {media.format && (
-            <div className="bg-neutral-950/75 backdrop-blur-md px-1.5 py-0.5 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-white/90 border border-white/10">
+            <div className="bg-cinema/80 backdrop-blur-md px-1.5 py-0.5 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cinema-foreground/90 border border-cinema-foreground/10">
               {activeType === "anime" ? (
-                <Tv className="w-2.5 h-2.5" />
+                <Tv className="w-2.5 h-2.5 text-primary" />
               ) : (
-                <BookOpen className="w-2.5 h-2.5" />
+                <BookOpen className="w-2.5 h-2.5 text-primary" />
               )}
               <span>{String(media.format).replace(/_/g, " ")}</span>
             </div>
@@ -142,7 +142,7 @@ export function MediaCard({
         {badgeText && (
           <div className="absolute bottom-2.5 left-2 right-2 z-10 pointer-events-none group-hover:opacity-0 transition-opacity duration-200">
             <span
-              className="inline-block px-2 py-0.5 rounded-md bg-neutral-950/85 backdrop-blur-md text-[9px] font-black uppercase tracking-widest border border-white/15 text-white truncate max-w-full"
+              className="inline-block px-2 py-0.5 rounded-md bg-cinema/85 backdrop-blur-md text-[9px] font-black uppercase tracking-widest border border-cinema-foreground/15 text-cinema-foreground truncate max-w-full"
               style={{ borderLeftColor: accentColor, borderLeftWidth: "3px" }}
             >
               {badgeText}
@@ -151,9 +151,9 @@ export function MediaCard({
         )}
 
         {/* Bottom Scrim & Status Pill on Hover */}
-        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-neutral-950/90 via-neutral-950/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-cinema/95 via-cinema/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
         {media.status && (
-          <div className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded-md bg-neutral-950/85 backdrop-blur-md text-[10px] font-extrabold text-center text-white border border-white/15 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10 uppercase tracking-wider flex items-center justify-center gap-1.5">
+          <div className="absolute bottom-2 left-2 right-2 px-2 py-1 rounded-md bg-cinema/90 backdrop-blur-md text-[10px] font-extrabold text-center text-cinema-foreground border border-cinema-foreground/15 opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10 uppercase tracking-wider flex items-center justify-center gap-1.5">
             <span
               className={cn(
                 "w-1.5 h-1.5 rounded-full shrink-0",
@@ -161,7 +161,7 @@ export function MediaCard({
               )}
               style={{
                 backgroundColor:
-                  media.status === "RELEASING" ? "#22c55e" : accentColor,
+                  media.status === "RELEASING" ? "var(--success)" : accentColor,
               }}
             />
             <span className="truncate">

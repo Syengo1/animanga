@@ -1,20 +1,35 @@
 // C:\Projects\animanga-platform\apps\web\src\app\layout.tsx
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { QueryProvider } from "@/providers/query-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { RouteAwareLayout } from "@/components/layout/route-aware-layout";
 import { getCurrentUser } from "@/lib/auth/session";
+import { THEME_PALETTE } from "@/config/theme.config";
 import "./globals.css";
+
+const alkatraFont = localFont({
+  src: "../../public/fonts/Alkatra-VariableFont_wght.woff2",
+  variable: "--font-alkatra",
+  weight: "400 700",
+  display: "swap",
+});
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_WEB_URL || "https://animangaweb.vercel.app";
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafafa" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b0b0f" },
+    {
+      media: "(prefers-color-scheme: light)",
+      color: THEME_PALETTE.light.background,
+    },
+    {
+      media: "(prefers-color-scheme: dark)",
+      color: THEME_PALETTE.dark.background,
+    },
   ],
   width: "device-width",
   initialScale: 1,
@@ -105,8 +120,13 @@ export default async function RootLayout({
   };
 
   return (
-    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
-      <body className="bg-background text-foreground antialiased transition-colors duration-300 min-h-screen flex flex-col">
+    <html
+      lang="en"
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+      className={alkatraFont.variable}
+    >
+      <body className="bg-background text-foreground font-sans antialiased transition-colors duration-300 min-h-screen flex flex-col">
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
