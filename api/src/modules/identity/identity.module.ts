@@ -1,7 +1,7 @@
-import { Module, Global } from '@nestjs/common'; // <-- NEW: Import Global
+// C:\Projects\animanga-platform\api\src\modules\identity\identity.module.ts
+import { Module, Global } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-// Removed JwtModule as it is no longer used
-
+import { IntegrationModule } from '../integration/integration.module';
 import { User } from './entities/user.entity';
 import { Role } from './entities/role.entity';
 import { Permission } from './entities/permission.entity';
@@ -14,19 +14,17 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
 import { PasswordCredential } from './entities/password-credential.entity';
 import { ExternalIdentity } from './entities/external-identity.entity';
 import { Session } from './entities/session.entity';
-
 import { AuthorizationService } from './services/authorization.service';
 import { AuditService } from './services/audit.service';
 import { UserService } from './services/user.service';
 import { KycService } from './services/kyc.service';
 import { AuthService } from './services/auth.service';
 import { SessionService } from './services/session.service';
-
 import { AuthController } from './controllers/auth.controller';
 import { UserController } from './controllers/user.controller';
 import { AdminKycController } from './controllers/admin-kyc.controller';
 
-@Global() // <-- NEW: Makes SessionService available to all guards automatically
+@Global()
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -43,6 +41,7 @@ import { AdminKycController } from './controllers/admin-kyc.controller';
       ExternalIdentity,
       Session,
     ]),
+    IntegrationModule,
   ],
   controllers: [AuthController, UserController, AdminKycController],
   providers: [

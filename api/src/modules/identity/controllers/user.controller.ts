@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\identity\controllers\user.controller.ts
 import {
   Controller,
   Get,
@@ -23,7 +24,7 @@ import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import { AuthGuard } from '../../../common/guards/auth.guard';
 import { AuthenticatedRequest } from '../../../common/interfaces/request.interface';
 
-@UseGuards(AuthGuard) // FIX: Activated AuthGuard to protect all personal profile endpoints
+@UseGuards(AuthGuard)
 @Controller('users/me')
 export class UserController {
   constructor(
@@ -33,8 +34,8 @@ export class UserController {
   ) {}
 
   @Get()
-  getProfile() {
-    return { message: 'Return current user profile (No password hash!)' };
+  async getProfile(@Req() req: AuthenticatedRequest) {
+    return this.userService.getProfileById(req.user.id);
   }
 
   @Patch()
@@ -53,18 +54,15 @@ export class UserController {
   submitKyc(
     @Body(new ZodValidationPipe(SubmitKycSchema)) body: SubmitKycInput,
   ) {
-    // Will call this.kycService.submit(...)
     return { message: 'KYC profile submitted for review', data: body };
   }
 
-  // NEW: F03.1 Google Account Linking
   @Post('link/google')
   @HttpCode(HttpStatus.OK)
   async linkGoogleAccount(
     @Req() req: AuthenticatedRequest,
     @Body(new ZodValidationPipe(GoogleAuthSchema)) body: GoogleAuthInput,
   ) {
-    // req.user is guaranteed to exist and be populated by AuthGuard
     return this.authService.linkGoogleAccount(req.user.id, body);
   }
 }

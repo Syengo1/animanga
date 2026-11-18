@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\common\guards\auth.guard.ts
 import {
   CanActivate,
   ExecutionContext,
@@ -7,6 +8,10 @@ import {
 import { Request } from 'express';
 import { AuthenticatedRequest } from '../interfaces/request.interface';
 import { SessionService } from '../../modules/identity/services/session.service';
+
+const PROD_AUTH_COOKIE_NAME = '__Host-animanga_session';
+const DEV_AUTH_COOKIE_NAME = 'animanga_session';
+const BEARER_REGEX = /^Bearer\s+([a-f0-9]{64})$/i;
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -23,17 +28,15 @@ export class AuthGuard implements CanActivate {
     }
 
     try {
-      // Validates the token against the database and checks for revocation/expiration
       const sessionData = await this.sessionService.validateSession(token);
 
-      // Attach the resolved user identity to the request context
       request.user = {
         id: sessionData.userId,
         email: sessionData.email,
       };
 
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
@@ -42,25 +45,28 @@ export class AuthGuard implements CanActivate {
   }
 
   private extractToken(request: Request): string | undefined {
-    // 1. Try secure cookies first (The primary mechanism for web browsers)
-    const isProd = process.env.NODE_ENV === 'production';
-    const cookieName = isProd ? '__Host-animanga_session' : 'animanga_session';
-
-    // Safely parse cookies as a Record
+    // 1. Check HttpOnly session cookies first (supports both prod __Host- prefix and dev fallback)
     const cookies = (request.cookies || {}) as Record<
       string,
       string | undefined
     >;
-    if (cookies[cookieName]) {
-      return cookies[cookieName];
+
+    const prodToken = cookies[PROD_AUTH_COOKIE_NAME];
+    if (typeof prodToken === 'string' && prodToken.trim()) {
+      return prodToken.trim();
     }
 
-    // 2. Fallback to Bearer token (For mobile apps, CLI, or API clients)
-    const authHeader = request.headers.authorization;
-    if (authHeader) {
-      const [type, token] = authHeader.split(' ');
-      if (type === 'Bearer' && token) {
-        return token;
+    const devToken = cookies[DEV_AUTH_COOKIE_NAME];
+    if (typeof devToken === 'string' && devToken.trim()) {
+      return devToken.trim();
+    }
+
+    // 2. Fallback to RFC 6750 Authorization: Bearer <token> header
+    const rawAuthHeader = request.headers.authorization;
+    if (typeof rawAuthHeader === 'string') {
+      const match = BEARER_REGEX.exec(rawAuthHeader.trim());
+      if (match?.[1]) {
+        return match[1];
       }
     }
 

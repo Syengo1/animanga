@@ -1,6 +1,7 @@
+// C:\Projects\animanga-platform\apps\web\src\app\(auth)\register\page.tsx
 "use client";
 
-import { useState, useEffect, Suspense, useRef } from "react";
+import { useState, useEffect, Suspense, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -17,8 +18,12 @@ import {
   MailX,
   Send,
   AlertCircle,
+  MailWarning,
+  RefreshCw,
+  ArrowLeft,
+  Search,
 } from "lucide-react";
-import { useGoogleLogin } from "@react-oauth/google"; // <-- NEW
+import { useGoogleLogin } from "@react-oauth/google";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,8 +33,10 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { useAuth } from "@/providers/auth-provider"; // <-- NEW
+import { useAuth } from "@/providers/auth-provider";
 import { cn } from "@/lib/utils";
+
+const PENDING_EMAIL_STORAGE_KEY = "animanga:pending_registration_email";
 
 const registerSchema = z.object({
   name: z
@@ -61,6 +68,21 @@ const registerSchema = z.object({
 
 type RegisterFormData = z.infer<typeof registerSchema>;
 
+interface RegistrationStatusPayload {
+  exists: boolean;
+  status:
+    | "PENDING_EMAIL_VERIFICATION"
+    | "ACTIVE"
+    | "SUSPENDED"
+    | "DISABLED"
+    | "NOT_FOUND";
+  email: string;
+  username?: string;
+  emailVerifiedAt?: string | null;
+  registeredAt?: string;
+  message: string;
+}
+
 const getPasswordStrength = (pwd: string) => {
   let score = 0;
   if (pwd.length >= 12) score++;
@@ -74,16 +96,18 @@ function RegisterFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { updateUser } = useAuth();
-  const tokenFromUrl = searchParams.get("token");
 
-  // NEW: Token-aware tracking and terminal success latch
+  const tokenFromUrl = searchParams.get("token");
+  const statusModeFromUrl = searchParams.get("status");
+  const emailFromUrl = searchParams.get("email");
+
   const attemptedTokenRef = useRef<string | null>(null);
   const verificationSucceededRef = useRef(false);
 
-  // UX States based on deterministic backend codes
   type ViewState =
     | "idle"
     | "success"
+    | "status_check"
     | "verifying"
     | "verified"
     | "expired"
@@ -93,15 +117,26 @@ function RegisterFormContent() {
     | "error";
 
   const [viewState, setViewState] = useState<ViewState>(
-    tokenFromUrl ? "verifying" : "idle",
+    tokenFromUrl
+      ? "verifying"
+      : statusModeFromUrl === "check"
+        ? "status_check"
+        : "idle",
   );
 
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-
   const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [resendEmail, setResendEmail] = useState("");
+  const [resendEmail, setResendEmail] = useState(emailFromUrl || "");
+
+  // Status check & resend states
+  const [statusData, setStatusData] =
+    useState<RegistrationStatusPayload | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendFeedback, setResendFeedback] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const {
     register,
@@ -129,13 +164,76 @@ function RegisterFormContent() {
     special: /[^A-Za-z0-9]/.test(currentPassword),
   };
 
-  // EFFECT: Deterministic API evaluation
+  // Cooldown countdown timer for Resend button
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const fetchAccountStatus = useCallback(async (targetEmail: string) => {
+    const cleaned = targetEmail.trim().toLowerCase();
+    if (!cleaned) return;
+
+    setIsCheckingStatus(true);
+    setApiError(null);
+
+    try {
+      const res = await fetch(
+        `/api/v1/auth/status?email=${encodeURIComponent(cleaned)}`,
+      );
+      const json = await res.json();
+      const payload = (json?.data || json) as RegistrationStatusPayload;
+      setStatusData(payload);
+
+      if (payload?.status === "ACTIVE") {
+        try {
+          sessionStorage.removeItem(PENDING_EMAIL_STORAGE_KEY);
+        } catch {
+          // Ignore storage error
+        }
+      }
+    } catch {
+      setApiError("Unable to check registration status right now.");
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  }, []);
+
+  // Restore pending registration state if user refreshes page before confirming
+  // OR if navigated here via "Check registration status"
+  useEffect(() => {
+    if (tokenFromUrl) return;
+
+    let restoredEmail = emailFromUrl?.trim() || "";
+    if (!restoredEmail) {
+      try {
+        restoredEmail = sessionStorage.getItem(PENDING_EMAIL_STORAGE_KEY) || "";
+      } catch {
+        // Ignore storage error
+      }
+    }
+
+    if (restoredEmail) {
+      setResendEmail(restoredEmail);
+      if (statusModeFromUrl === "check") {
+        setViewState("status_check");
+        void fetchAccountStatus(restoredEmail);
+      } else {
+        setViewState("success");
+        void fetchAccountStatus(restoredEmail);
+      }
+    } else if (statusModeFromUrl === "check") {
+      setViewState("status_check");
+    }
+  }, [tokenFromUrl, emailFromUrl, statusModeFromUrl, fetchAccountStatus]);
+
+  // Verify token from email link
   useEffect(() => {
     if (!tokenFromUrl) return;
-
-    if (attemptedTokenRef.current === tokenFromUrl) {
-      return;
-    }
+    if (attemptedTokenRef.current === tokenFromUrl) return;
 
     attemptedTokenRef.current = tokenFromUrl;
 
@@ -151,18 +249,20 @@ function RegisterFormContent() {
 
         const body = await response.json();
 
-        // 1. Terminal Success (Locks out late failures)
         if (response.ok) {
           verificationSucceededRef.current = true;
+          try {
+            sessionStorage.removeItem(PENDING_EMAIL_STORAGE_KEY);
+          } catch {
+            // Ignore storage error
+          }
           setViewState("verified");
           return;
         }
 
-        // 2. Structured Failure Handling
-        const code = body?.message?.code || body?.code;
+        const code = body?.error?.code || body?.message?.code || body?.code;
 
         if (code === "VERIFICATION_TOKEN_ALREADY_USED") {
-          // Only show 'already used' if we didn't just succeed moments ago
           if (!verificationSucceededRef.current) {
             setViewState("already_used");
           }
@@ -180,7 +280,7 @@ function RegisterFormContent() {
         }
 
         setViewState("error");
-      } catch (error) {
+      } catch {
         setViewState("network_error");
       }
     };
@@ -197,7 +297,8 @@ function RegisterFormContent() {
   const onSubmit = async (data: RegisterFormData) => {
     setApiError(null);
     setSuggestions([]);
-    setResendEmail(data.email);
+    const normalizedEmail = data.email.trim().toLowerCase();
+    setResendEmail(normalizedEmail);
 
     const nameParts = data.name.trim().split(" ");
     const firstName = nameParts[0];
@@ -205,7 +306,7 @@ function RegisterFormContent() {
       nameParts.length > 1 ? nameParts.slice(1).join(" ") : undefined;
 
     const backendPayload = {
-      email: data.email,
+      email: normalizedEmail,
       username: data.username || undefined,
       password: data.password,
       firstName,
@@ -230,27 +331,109 @@ function RegisterFormContent() {
         let errorMessage = "Registration failed. Please try again.";
         if (resData.error?.errors && Array.isArray(resData.error.errors)) {
           errorMessage = resData.error.errors
-            .map((e: any) => e.message)
+            .map((e: { message: string }) => e.message)
             .join(", ");
         } else {
           errorMessage =
             resData.error?.message || resData.message || errorMessage;
         }
+
+        // If email is already registered, let the user check its verification status right away
+        if (
+          res.status === 409 &&
+          errorMessage.toLowerCase().includes("email is already registered")
+        ) {
+          try {
+            sessionStorage.setItem(PENDING_EMAIL_STORAGE_KEY, normalizedEmail);
+          } catch {
+            // Ignore
+          }
+          setViewState("status_check");
+          await fetchAccountStatus(normalizedEmail);
+          return;
+        }
+
         throw new Error(errorMessage);
       }
 
+      try {
+        sessionStorage.setItem(PENDING_EMAIL_STORAGE_KEY, normalizedEmail);
+      } catch {
+        // Ignore storage error
+      }
+
+      setResendCooldown(60);
       setViewState("success");
-    } catch (err: any) {
-      setApiError(err.message);
+      void fetchAccountStatus(normalizedEmail);
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : "Registration failed.");
     }
   };
 
   const handleResendLink = async () => {
-    alert("Verification link resent! (Endpoint wiring pending)");
-    setViewState("success");
+    const cleaned = resendEmail.trim().toLowerCase();
+    if (!cleaned) {
+      setViewState("status_check");
+      return;
+    }
+
+    setIsResending(true);
+    setResendFeedback(null);
+    setApiError(null);
+
+    try {
+      const res = await fetch("/api/v1/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleaned }),
+      });
+
+      const json = await res.json();
+      const payload = json?.data || json;
+
+      if (!res.ok) {
+        throw new Error(
+          json?.error?.message ||
+            json?.message ||
+            "Could not resend verification email. Please wait a moment and try again.",
+        );
+      }
+
+      if (payload?.alreadyVerified) {
+        setViewState("already_used");
+        return;
+      }
+
+      setResendFeedback(
+        payload?.message ||
+          "A fresh verification link has been sent! Check your Inbox and Spam folder.",
+      );
+      setResendCooldown(60);
+      await fetchAccountStatus(cleaned);
+    } catch (err: unknown) {
+      setApiError(
+        err instanceof Error
+          ? err.message
+          : "Failed to resend verification email.",
+      );
+    } finally {
+      setIsResending(false);
+    }
   };
 
-  // NEW: Google Auth-Code Exchange Flow
+  const clearSavedRegistrationAndReset = () => {
+    try {
+      sessionStorage.removeItem(PENDING_EMAIL_STORAGE_KEY);
+    } catch {
+      // Ignore
+    }
+    setStatusData(null);
+    setResendFeedback(null);
+    setApiError(null);
+    setViewState("idle");
+    router.replace("/register");
+  };
+
   const signupWithGoogle = useGoogleLogin({
     flow: "auth-code",
     onSuccess: async (codeResponse) => {
@@ -258,13 +441,10 @@ function RegisterFormContent() {
       setApiError(null);
 
       try {
-        const baseUrl =
-          process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
-          "http://127.0.0.1:3001";
-        const res = await fetch(`${baseUrl}/api/v1/auth/google`, {
+        const res = await fetch("/api/v1/auth/google", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          credentials: "include", // Mandatory for cookies
+          credentials: "include",
           body: JSON.stringify({
             code: codeResponse.code,
             redirectUri: "postmessage",
@@ -279,16 +459,16 @@ function RegisterFormContent() {
           );
         }
 
-        if (resData.data) {
+        const payload = resData?.data?.data || resData?.data;
+        if (payload) {
           updateUser({
-            id: resData.data.id,
-            email: resData.data.email,
-            roles: resData.data.roles || [],
-            permissions: resData.data.permissions || [],
+            id: payload.id,
+            email: payload.email,
+            roles: payload.roles || [],
+            permissions: payload.permissions || [],
           });
         }
 
-        // Google signup returns a valid session immediately. Bypass verification screen.
         router.push("/tickets");
         router.refresh();
       } catch (err: unknown) {
@@ -315,7 +495,7 @@ function RegisterFormContent() {
         <h3 className="text-xl font-bold text-foreground">
           Verifying your link...
         </h3>
-        <p className="text-sm text-foreground/60">
+        <p className="text-sm text-muted-foreground">
           Please wait while we activate your account.
         </p>
       </div>
@@ -325,21 +505,21 @@ function RegisterFormContent() {
   if (viewState === "verified") {
     return (
       <div className="animate-in zoom-in duration-500 flex flex-col items-center justify-center py-8 text-center space-y-6">
-        <div className="size-20 rounded-full bg-[#34A853]/20 flex items-center justify-center border border-[#34A853]/30">
-          <Check className="size-10 text-[#34A853]" />
+        <div className="size-20 rounded-full bg-success/20 flex items-center justify-center border border-success/30">
+          <Check className="size-10 text-success" />
         </div>
         <div>
           <h3 className="text-2xl font-bold text-foreground mb-2">
             Account Verified!
           </h3>
-          <p className="text-sm text-foreground/70">
+          <p className="text-sm text-muted-foreground">
             Welcome to Animanga. Your identity is secured and you are ready to
-            enter the void.
+            sign in.
           </p>
         </div>
         <Button
           onClick={() => router.push("/login")}
-          className="w-full h-12 bg-primary hover:bg-primary/90 text-foreground font-bold text-lg"
+          className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-base cursor-pointer"
         >
           Proceed to Login
         </Button>
@@ -350,21 +530,21 @@ function RegisterFormContent() {
   if (viewState === "already_used") {
     return (
       <div className="animate-in fade-in duration-500 flex flex-col items-center justify-center py-8 text-center space-y-6">
-        <div className="size-20 rounded-full bg-blue-500/20 flex items-center justify-center border border-blue-500/30">
-          <Check className="size-10 text-blue-500" />
+        <div className="size-20 rounded-full bg-primary/20 flex items-center justify-center border border-primary/30">
+          <Check className="size-10 text-primary" />
         </div>
         <div>
           <h3 className="text-2xl font-bold text-foreground mb-2">
             Already Verified
           </h3>
-          <p className="text-sm text-foreground/70">
+          <p className="text-sm text-muted-foreground">
             This account has already been activated. You can safely proceed to
             login.
           </p>
         </div>
         <Button
           onClick={() => router.push("/login")}
-          className="w-full h-12 bg-primary hover:bg-primary/90 text-foreground font-bold text-lg"
+          className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-base cursor-pointer"
         >
           Proceed to Login
         </Button>
@@ -382,17 +562,17 @@ function RegisterFormContent() {
           <h3 className="text-2xl font-bold text-foreground mb-2">
             Link Expired
           </h3>
-          <p className="text-sm text-foreground/70">
-            This verification link has expired. Please request a new one to
-            activate your account.
+          <p className="text-sm text-muted-foreground">
+            This verification link has expired. Enter your email to receive a
+            fresh 24-hour activation link.
           </p>
         </div>
         <Button
-          onClick={handleResendLink}
+          onClick={() => setViewState("status_check")}
           variant="outline"
-          className="w-full h-12 border-primary text-primary hover:bg-primary/10 font-bold"
+          className="w-full h-12 border-primary text-primary hover:bg-primary/10 font-bold cursor-pointer"
         >
-          <Send className="w-4 h-4 mr-2" /> Resend Verification Link
+          <Send className="w-4 h-4 mr-2" /> Request New Verification Link
         </Button>
       </div>
     );
@@ -408,17 +588,17 @@ function RegisterFormContent() {
           <h3 className="text-2xl font-bold text-foreground mb-2">
             Invalid Link
           </h3>
-          <p className="text-sm text-foreground/70">
-            We couldn't recognize this verification link. Ensure you copied the
-            full URL from your email.
+          <p className="text-sm text-muted-foreground">
+            We couldn&apos;t recognize this verification link. Ensure you copied
+            the full URL from your email.
           </p>
         </div>
         <Button
-          onClick={() => router.push("/register")}
+          onClick={() => setViewState("status_check")}
           variant="outline"
-          className="w-full h-12 border-primary text-primary hover:bg-primary/10 font-bold"
+          className="w-full h-12 border-primary text-primary hover:bg-primary/10 font-bold cursor-pointer"
         >
-          Return to Registration
+          Check Registration Status
         </Button>
       </div>
     );
@@ -434,15 +614,15 @@ function RegisterFormContent() {
           <h3 className="text-2xl font-bold text-foreground mb-2">
             Connection Error
           </h3>
-          <p className="text-sm text-foreground/70">
-            We couldn't verify your email right now. Please check your
+          <p className="text-sm text-muted-foreground">
+            We couldn&apos;t verify your email right now. Please check your
             connection and try again.
           </p>
         </div>
         <Button
           onClick={() => window.location.reload()}
           variant="outline"
-          className="w-full h-12 border-primary text-primary hover:bg-primary/10 font-bold"
+          className="w-full h-12 border-primary text-primary hover:bg-primary/10 font-bold cursor-pointer"
         >
           Retry Verification
         </Button>
@@ -450,34 +630,190 @@ function RegisterFormContent() {
     );
   }
 
-  if (viewState === "success") {
+  // REGISTRATION STATUS & VERIFICATION HUB (Triggered after signup, on refresh, or via "Check registration status")
+  if (viewState === "success" || viewState === "status_check") {
+    const isVerified = statusData?.status === "ACTIVE";
+    const isNotFound = statusData?.status === "NOT_FOUND";
+
     return (
-      <div className="animate-in zoom-in duration-500 flex flex-col items-center justify-center py-8 text-center space-y-6">
-        <div className="size-16 rounded-full bg-blue-500/20 flex items-center justify-center border border-blue-500/30">
-          <Send className="size-8 text-blue-500" />
-        </div>
-        <div>
-          <h3 className="text-xl font-bold text-foreground mb-2">
-            Check your Inbox
-          </h3>
-          <p className="text-sm text-foreground/70">
-            We've securely reserved your handle. Please click the activation
-            link sent to{" "}
-            <span className="text-foreground font-semibold">{resendEmail}</span>{" "}
-            to complete registration.
-          </p>
-        </div>
-        <div className="pt-4 w-full border-t border-border">
-          <p className="text-xs text-foreground/50 mb-3">
-            Didn't receive the email?
-          </p>
-          <Button
-            onClick={handleResendLink}
-            variant="ghost"
-            className="w-full text-foreground/70 hover:text-foreground hover:bg-accent text-xs h-8"
+      <div className="animate-in fade-in duration-300 flex flex-col space-y-5 py-2">
+        {/* Email lookup bar when checking status */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void fetchAccountStatus(resendEmail);
+          }}
+          className="flex flex-col gap-2"
+        >
+          <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            Account Email Address
+          </label>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              required
+              value={resendEmail}
+              onChange={(e) => setResendEmail(e.target.value)}
+              placeholder="Enter your registered email..."
+              className="h-10 bg-background/70 border-border text-sm"
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={isCheckingStatus || !resendEmail.trim()}
+              className="h-10 px-3.5 font-bold text-xs gap-1.5 shrink-0 cursor-pointer"
+            >
+              {isCheckingStatus ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Search className="w-3.5 h-3.5" />
+              )}
+              <span>Check</span>
+            </Button>
+          </div>
+        </form>
+
+        {/* Status Card */}
+        {isVerified ? (
+          <div className="p-4 rounded-xl bg-success/10 border border-success/30 text-left space-y-3">
+            <div className="flex items-center gap-2 text-success font-bold text-sm">
+              <Check className="w-5 h-5 shrink-0" />
+              <span>Account Verified &amp; Active</span>
+            </div>
+            <p className="text-xs text-foreground/85 leading-relaxed">
+              Your account (
+              <span className="font-bold">{statusData.email}</span>) is already
+              verified. You can sign in right away.
+            </p>
+            <Button
+              onClick={() => router.push("/login")}
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs cursor-pointer"
+            >
+              Proceed to Sign In
+            </Button>
+          </div>
+        ) : isNotFound ? (
+          <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-left space-y-3">
+            <div className="flex items-center gap-2 text-destructive font-bold text-sm">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>No Account Found</span>
+            </div>
+            <p className="text-xs text-foreground/85 leading-relaxed">
+              We couldn&apos;t find a registration for{" "}
+              <span className="font-bold">{statusData.email}</span>. Check for
+              typos or create a new account below.
+            </p>
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl bg-warning/10 border border-warning/30 text-left space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-warning font-bold text-sm">
+                <MailWarning className="w-5 h-5 shrink-0" />
+                <span>Pending Email Verification</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void fetchAccountStatus(resendEmail)}
+                disabled={isCheckingStatus}
+                title="Refresh verification status"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline cursor-pointer"
+              >
+                <RefreshCw
+                  className={cn("w-3 h-3", isCheckingStatus && "animate-spin")}
+                />
+                <span>Refresh</span>
+              </button>
+            </div>
+
+            <p className="text-xs text-foreground/85 leading-relaxed">
+              We sent an activation link to{" "}
+              <span className="font-bold text-foreground">
+                {resendEmail || "your email"}
+              </span>
+              . Click the link in that email to activate your account.
+            </p>
+
+            <div className="p-3 rounded-lg bg-background/70 border border-border text-xs text-muted-foreground space-y-1">
+              <p className="font-bold text-foreground">
+                Can&apos;t find the verification email?
+              </p>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                <li>
+                  Check your{" "}
+                  <strong className="text-foreground">
+                    Spam, Junk, or Promotions
+                  </strong>{" "}
+                  folder.
+                </li>
+                <li>
+                  Mark the email as{" "}
+                  <strong className="text-foreground">
+                    &ldquo;Not Spam&rdquo;
+                  </strong>{" "}
+                  so the activation button is clickable.
+                </li>
+                <li>
+                  Allow 10–30 seconds for Gmail delivery, or click{" "}
+                  <strong className="text-foreground">Resend</strong> below.
+                </li>
+              </ul>
+            </div>
+
+            {resendFeedback && (
+              <div className="p-2.5 rounded-lg bg-success/15 border border-success/30 text-success text-xs font-semibold flex items-center gap-2">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{resendFeedback}</span>
+              </div>
+            )}
+
+            {apiError && (
+              <div className="p-2.5 rounded-lg bg-destructive/15 border border-destructive/30 text-destructive text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{apiError}</span>
+              </div>
+            )}
+
+            <Button
+              type="button"
+              onClick={() => void handleResendLink()}
+              disabled={
+                isResending || resendCooldown > 0 || !resendEmail.trim()
+              }
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs gap-2 cursor-pointer"
+            >
+              {isResending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Sending fresh link...</span>
+                </>
+              ) : resendCooldown > 0 ? (
+                <span>Resend available in {resendCooldown}s</span>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Resend Verification Email</span>
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+
+        <div className="pt-2 border-t border-border flex items-center justify-between text-xs">
+          <button
+            type="button"
+            onClick={clearSavedRegistrationAndReset}
+            className="inline-flex items-center gap-1 font-bold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            Click here to resend
-          </Button>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Register a different account</span>
+          </button>
+
+          <Link
+            href="/login"
+            className="font-bold text-primary hover:underline"
+          >
+            Back to Sign In
+          </Link>
         </div>
       </div>
     );
@@ -491,14 +827,14 @@ function RegisterFormContent() {
         className="flex flex-col gap-[clamp(0.5rem,1.2dvh,1rem)]"
       >
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
+          <label className="text-[10px] sm:text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
             Full Name
           </label>
           <Input
             type="text"
             {...register("name")}
             placeholder="Monkey D. Luffy"
-            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
+            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/70 border-border focus-visible:ring-primary text-sm"
           />
           {errors.name && (
             <p className="text-[10px] text-destructive leading-tight">
@@ -508,9 +844,9 @@ function RegisterFormContent() {
         </div>
 
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider flex justify-between">
+          <label className="text-[10px] sm:text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex justify-between">
             <span>Username</span>
-            <span className="text-foreground/30 lowercase normal-case">
+            <span className="text-muted-foreground/60 lowercase normal-case">
               (Optional)
             </span>
           </label>
@@ -518,7 +854,7 @@ function RegisterFormContent() {
             type="text"
             {...register("username")}
             placeholder="joyboy_2026"
-            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
+            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/70 border-border focus-visible:ring-primary text-sm"
           />
           {errors.username && (
             <p className="text-[10px] text-destructive leading-tight">
@@ -538,7 +874,7 @@ function RegisterFormContent() {
                     key={sug}
                     type="button"
                     onClick={() => applySuggestion(sug)}
-                    className="text-[11px] py-1.5 px-2 bg-background/40 hover:bg-primary/20 border border-white/5 rounded text-foreground/80 transition-colors truncate"
+                    className="text-[11px] py-1.5 px-2 bg-background/70 hover:bg-primary/20 border border-border rounded text-foreground transition-colors truncate cursor-pointer"
                   >
                     {sug}
                   </button>
@@ -549,14 +885,14 @@ function RegisterFormContent() {
         </div>
 
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
+          <label className="text-[10px] sm:text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
             Email
           </label>
           <Input
             type="email"
             {...register("email")}
             placeholder="goku@capsulecorp.com"
-            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary text-sm"
+            className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/70 border-border focus-visible:ring-primary text-sm"
           />
           {errors.email && (
             <p className="text-[10px] text-destructive leading-tight">
@@ -566,20 +902,20 @@ function RegisterFormContent() {
         </div>
 
         <div className="space-y-[clamp(0.15rem,0.5dvh,0.25rem)]">
-          <label className="text-[10px] sm:text-[11px] font-bold text-foreground/70 uppercase tracking-wider">
+          <label className="text-[10px] sm:text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
             Password
           </label>
           <div className="relative">
             <Input
               type={showPassword ? "text" : "password"}
               {...register("password")}
-              placeholder="••••••••"
-              className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/40 border-border focus-visible:ring-primary pr-10 text-sm"
+              placeholder="••••••••••••"
+              className="h-[clamp(2.25rem,4dvh,2.5rem)] bg-background/70 border-border focus-visible:ring-primary pr-10 text-sm"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground/50 hover:text-foreground transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
             >
               {showPassword ? (
                 <EyeOff className="w-4 h-4" />
@@ -595,58 +931,58 @@ function RegisterFormContent() {
                 <div
                   className={cn(
                     "h-full flex-1 transition-all duration-300",
-                    strengthScore >= 1 ? "bg-red-500" : "bg-white/10",
+                    strengthScore >= 1 ? "bg-destructive" : "bg-muted",
                   )}
                 />
                 <div
                   className={cn(
                     "h-full flex-1 transition-all duration-300",
-                    strengthScore >= 2 ? "bg-orange-500" : "bg-white/10",
+                    strengthScore >= 2 ? "bg-warning" : "bg-muted",
                   )}
                 />
                 <div
                   className={cn(
                     "h-full flex-1 transition-all duration-300",
-                    strengthScore >= 3 ? "bg-yellow-500" : "bg-white/10",
+                    strengthScore >= 3 ? "bg-info" : "bg-muted",
                   )}
                 />
                 <div
                   className={cn(
                     "h-full flex-1 transition-all duration-300",
-                    strengthScore >= 4 ? "bg-[#34A853]" : "bg-white/10",
+                    strengthScore >= 4 ? "bg-success" : "bg-muted",
                   )}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-y-0.5 gap-x-2 text-[9px] sm:text-[10px] text-foreground/60">
+              <div className="grid grid-cols-2 gap-y-0.5 gap-x-2 text-[9px] sm:text-[10px] text-muted-foreground">
                 <div className="flex items-center gap-1">
                   {checks.length ? (
-                    <Check className="w-3 h-3 text-[#34A853]" />
+                    <Check className="w-3 h-3 text-success" />
                   ) : (
-                    <X className="w-3 h-3 text-red-400" />
+                    <X className="w-3 h-3 text-destructive" />
                   )}{" "}
                   12+ chars
                 </div>
                 <div className="flex items-center gap-1">
                   {checks.casing ? (
-                    <Check className="w-3 h-3 text-[#34A853]" />
+                    <Check className="w-3 h-3 text-success" />
                   ) : (
-                    <X className="w-3 h-3 text-red-400" />
+                    <X className="w-3 h-3 text-destructive" />
                   )}{" "}
-                  Upper & lowercase
+                  Upper &amp; lowercase
                 </div>
                 <div className="flex items-center gap-1">
                   {checks.number ? (
-                    <Check className="w-3 h-3 text-[#34A853]" />
+                    <Check className="w-3 h-3 text-success" />
                   ) : (
-                    <X className="w-3 h-3 text-red-400" />
+                    <X className="w-3 h-3 text-destructive" />
                   )}{" "}
                   1+ number
                 </div>
                 <div className="flex items-center gap-1">
                   {checks.special ? (
-                    <Check className="w-3 h-3 text-[#34A853]" />
+                    <Check className="w-3 h-3 text-success" />
                   ) : (
-                    <X className="w-3 h-3 text-red-400" />
+                    <X className="w-3 h-3 text-destructive" />
                   )}{" "}
                   1+ special
                 </div>
@@ -666,7 +1002,7 @@ function RegisterFormContent() {
           disabled={
             isSubmitting || (currentPassword.length > 0 && strengthScore < 4)
           }
-          className="w-full h-[clamp(2.25rem,4dvh,2.5rem)] mt-0.5 bg-primary hover:bg-primary/90 text-foreground font-bold text-sm transition-all duration-300 disabled:opacity-50"
+          className="w-full h-[clamp(2.25rem,4dvh,2.5rem)] mt-0.5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm transition-all duration-300 disabled:opacity-50 cursor-pointer"
         >
           {isSubmitting ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -681,7 +1017,7 @@ function RegisterFormContent() {
           <span className="w-full border-t border-border" />
         </div>
         <div className="relative flex justify-center text-[9px] font-bold uppercase tracking-wider">
-          <span className="bg-[#100c14] lg:bg-[#151119] px-2 text-foreground/50 rounded-full">
+          <span className="bg-card px-2.5 text-muted-foreground rounded-full">
             Or continue with
           </span>
         </div>
@@ -690,9 +1026,9 @@ function RegisterFormContent() {
       <Button
         type="button"
         variant="outline"
-        onClick={() => signupWithGoogle()} // <-- FIX: Use the hook
+        onClick={() => signupWithGoogle()}
         disabled={isGoogleLoading || isSubmitting}
-        className="w-full h-[clamp(2.25rem,4dvh,2.5rem)] bg-white text-black hover:bg-white/90 border-transparent font-bold text-sm"
+        className="w-full h-[clamp(2.25rem,4dvh,2.5rem)] bg-secondary/70 text-foreground hover:bg-accent border-border font-bold text-sm cursor-pointer"
       >
         {isGoogleLoading ? (
           <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />
@@ -719,60 +1055,69 @@ function RegisterFormContent() {
         Sign up with Google
       </Button>
 
-      <p className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-center text-foreground/50 mt-[clamp(0.75rem,2dvh,1.25rem)]">
-        Already have an account?{" "}
-        <Link
-          href="/login"
-          className="text-primary hover:text-primary/80 font-bold transition-colors"
+      <div className="flex items-center justify-between text-[clamp(0.7rem,1.5dvh,0.82rem)] text-muted-foreground mt-[clamp(0.75rem,2dvh,1.25rem)]">
+        <span>
+          Already have an account?{" "}
+          <Link
+            href="/login"
+            className="text-primary hover:text-primary/80 font-bold transition-colors"
+          >
+            Sign in
+          </Link>
+        </span>
+        <button
+          type="button"
+          onClick={() => setViewState("status_check")}
+          className="text-primary hover:underline font-bold cursor-pointer"
         >
-          Sign in here
-        </Link>
-      </p>
+          Check status
+        </button>
+      </div>
     </>
   );
 }
 
 export default function RegisterPage() {
   return (
-    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-foreground">
-      <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none">
-        <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-black lg:via-black/20 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
+    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-primary-foreground">
+      <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none bg-cinema">
+        <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-cinema lg:via-cinema/30 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
         <img
           src="/assets/hero/makizenin.avif"
           alt="Registration Background"
           className="object-cover w-full h-full opacity-60 lg:opacity-80 scale-105"
         />
         <div className="hidden lg:block absolute bottom-[clamp(2rem,6dvh,3rem)] left-12 z-20 max-w-lg">
-          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-foreground tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
+          <h2 className="text-[clamp(2rem,5dvh,2.25rem)] font-black text-cinema-foreground tracking-tighter mb-[clamp(0.5rem,2dvh,1rem)] leading-none">
             JOIN THE VOID.
           </h2>
-          <p className="text-foreground/60 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
+          <p className="text-cinema-foreground/75 text-[clamp(1rem,2dvh,1.125rem)] font-medium leading-relaxed">
             Create your account to unlock exclusive ticket drops, track your
             anime watchlist, and connect with the community.
           </p>
         </div>
       </div>
 
-      <div className="relative z-10 w-full lg:w-1/2 h-full flex flex-col items-center overflow-y-auto no-scrollbar p-4 lg:p-8 lg:bg-[#100c14]">
+      <div className="relative z-10 w-full lg:w-1/2 h-full flex flex-col items-center overflow-y-auto no-scrollbar p-4 lg:p-8 bg-background/80 lg:bg-background">
         <div className="w-full max-w-md my-auto animate-in fade-in slide-in-from-bottom-4 duration-700 py-4">
           <Link
             href="/"
             className="flex items-center gap-2 mb-[clamp(0.75rem,2dvh,1.5rem)] w-fit hover:opacity-80 transition-opacity mx-auto lg:mx-0"
           >
-            <span className="flex size-[clamp(2rem,4dvh,2.5rem)] items-center justify-center rounded-xl border border-border bg-accent backdrop-blur-md">
+            <span className="flex size-[clamp(2rem,4dvh,2.5rem)] items-center justify-center rounded-xl border border-primary/30 bg-primary/10 backdrop-blur-md">
               <Flame className="size-4 sm:size-5 text-primary" />
             </span>
-            <span className="text-[clamp(1rem,2.5dvh,1.25rem)] font-bold tracking-tight">
-              Animanga
+            <span className="text-[clamp(1rem,2.5dvh,1.25rem)] font-black tracking-tight">
+              ANI<span className="text-primary">MANGA</span>
             </span>
           </Link>
 
-          <Card className="bg-background/60 lg:bg-accent border-border backdrop-blur-2xl shadow-2xl p-[clamp(1rem,2.5dvh,1.5rem)]">
+          <Card className="bg-card/90 border-border backdrop-blur-2xl shadow-2xl p-[clamp(1rem,2.5dvh,1.5rem)]">
             <CardHeader className="p-0 pb-[clamp(0.5rem,1.5dvh,1.25rem)]">
-              <CardTitle className="text-[clamp(1.125rem,2.5dvh,1.5rem)] font-black tracking-tight">
+              <CardTitle className="text-[clamp(1.125rem,2.5dvh,1.5rem)] font-black tracking-tight text-card-foreground">
                 Create Account
               </CardTitle>
-              <CardDescription className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-foreground/60">
+              <CardDescription className="text-[clamp(0.7rem,1.5dvh,0.875rem)] text-muted-foreground">
                 Register to secure your identity on the platform.
               </CardDescription>
             </CardHeader>

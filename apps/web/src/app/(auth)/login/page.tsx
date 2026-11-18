@@ -7,7 +7,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Flame, Eye, EyeOff, Loader2, Check, MailWarning } from "lucide-react";
+import {
+  Flame,
+  Eye,
+  EyeOff,
+  Loader2,
+  Check,
+  MailWarning,
+  ArrowRight,
+} from "lucide-react";
 import { useGoogleLogin } from "@react-oauth/google";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,12 +69,14 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [isUnverified, setIsUnverified] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string>("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -76,16 +86,16 @@ function LoginForm() {
     },
   });
 
+  const watchedEmail = watch("email", "");
+
   const onSubmit = async (data: LoginFormData) => {
     setApiError(null);
     setIsUnverified(false);
 
     try {
-      const baseUrl =
-        process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
-        "http://127.0.0.1:3001";
-
-      const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      // Route through Next.js same-origin rewrite proxy (/api/v1/*) so Set-Cookie
+      // binds directly to animangaweb.vercel.app
+      const res = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -105,26 +115,37 @@ function LoginForm() {
           errorMessage.toLowerCase().includes("verify your email")
         ) {
           setIsUnverified(true);
+          setUnverifiedEmail(data.email.trim().toLowerCase());
+          try {
+            sessionStorage.setItem(
+              "animanga:pending_registration_email",
+              data.email.trim().toLowerCase(),
+            );
+          } catch {
+            // Ignore sessionStorage errors
+          }
           throw new Error("Your account requires email verification.");
         }
 
         throw new Error(errorMessage);
       }
 
-      if (resData.data) {
+      const payload =
+        (resData as unknown as { data?: { data?: ApiLoginResponse["data"] } })
+          .data?.data || resData.data;
+
+      if (payload) {
         updateUser({
-          id: resData.data.id,
-          email: resData.data.email,
-          roles: resData.data.roles || [],
-          permissions: resData.data.permissions || [],
+          id: payload.id,
+          email: payload.email,
+          roles: payload.roles || [],
+          permissions: payload.permissions || [],
         });
       }
 
       setIsSuccess(true);
-      setTimeout(() => {
-        router.push(callbackUrl);
-        router.refresh();
-      }, 1200);
+      router.push(callbackUrl);
+      router.refresh();
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -140,11 +161,7 @@ function LoginForm() {
       setIsUnverified(false);
 
       try {
-        const baseUrl =
-          process.env.NEXT_PUBLIC_API_URL?.replace("localhost", "127.0.0.1") ||
-          "http://127.0.0.1:3001";
-
-        const res = await fetch(`${baseUrl}/api/v1/auth/google`, {
+        const res = await fetch("/api/v1/auth/google", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
@@ -162,20 +179,22 @@ function LoginForm() {
           );
         }
 
-        if (resData.data) {
+        const payload =
+          (resData as unknown as { data?: { data?: ApiLoginResponse["data"] } })
+            .data?.data || resData.data;
+
+        if (payload) {
           updateUser({
-            id: resData.data.id,
-            email: resData.data.email,
-            roles: resData.data.roles || [],
-            permissions: resData.data.permissions || [],
+            id: payload.id,
+            email: payload.email,
+            roles: payload.roles || [],
+            permissions: payload.permissions || [],
           });
         }
 
         setIsSuccess(true);
-        setTimeout(() => {
-          router.push(callbackUrl);
-          router.refresh();
-        }, 1200);
+        router.push(callbackUrl);
+        router.refresh();
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : "Google login failed.";
@@ -188,6 +207,11 @@ function LoginForm() {
       setApiError("Google Login was cancelled or failed.");
     },
   });
+
+  const targetStatusEmail = unverifiedEmail || watchedEmail.trim();
+  const statusHref = targetStatusEmail
+    ? `/register?status=check&email=${encodeURIComponent(targetStatusEmail)}`
+    : "/register?status=check";
 
   return (
     <div className="w-full max-w-md my-auto animate-in fade-in slide-from-bottom-4 duration-700 py-4">
@@ -209,7 +233,7 @@ function LoginForm() {
             Welcome back.
           </CardTitle>
           <CardDescription className="text-[clamp(0.75rem,1.5dvh,0.875rem)] text-muted-foreground">
-            Enter the void and access your ticket wallet.
+            Sign in to access your dashboard and ticket wallet.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -240,10 +264,10 @@ function LoginForm() {
                   Password
                 </label>
                 <Link
-                  href="/forgot-password"
-                  className="text-[10px] sm:text-xs text-primary hover:underline"
+                  href={statusHref}
+                  className="text-[10px] sm:text-xs text-primary hover:underline font-semibold"
                 >
-                  Forgot password?
+                  Check registration status
                 </Link>
               </div>
               <div className="relative">
@@ -274,20 +298,25 @@ function LoginForm() {
             </div>
 
             {isUnverified ? (
-              <div className="p-3 mt-1 text-xs sm:text-sm text-warning bg-warning/10 border border-warning/25 rounded-lg flex flex-col gap-2">
+              <div className="p-3.5 mt-1 text-xs sm:text-sm text-warning bg-warning/10 border border-warning/30 rounded-xl flex flex-col gap-2">
                 <div className="flex items-center gap-2 font-bold">
                   <MailWarning className="w-4 h-4 shrink-0" /> Account Not
                   Verified
                 </div>
-                <p className="text-warning/85">
+                <p className="text-foreground/85 text-xs leading-relaxed">
                   Please check your inbox for the activation link we sent when
-                  you registered.
+                  you registered. If you don&apos;t see it, check your{" "}
+                  <strong className="text-foreground">
+                    Spam or Promotions
+                  </strong>{" "}
+                  folder.
                 </p>
                 <Link
-                  href="/register"
-                  className="text-left underline hover:opacity-80 w-fit"
+                  href={statusHref}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline w-fit pt-0.5"
                 >
-                  Check registration status
+                  <span>Check registration status &amp; resend link</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
             ) : (
@@ -302,7 +331,7 @@ function LoginForm() {
               type="submit"
               disabled={isSubmitting || isSuccess}
               className={cn(
-                "w-full h-[clamp(2.5rem,5dvh,2.75rem)] mt-1 font-bold text-sm sm:text-base transition-all duration-300",
+                "w-full h-[clamp(2.5rem,5dvh,2.75rem)] mt-1 font-bold text-sm sm:text-base transition-all duration-300 cursor-pointer",
                 isSuccess
                   ? "bg-success hover:bg-success/90 text-success-foreground"
                   : "bg-primary hover:bg-primary/90 text-primary-foreground",
@@ -315,7 +344,7 @@ function LoginForm() {
                   <Check className="w-4 h-4 sm:w-5 sm:h-5" /> Link Established
                 </span>
               ) : (
-                "Initialize Link"
+                "Sign In"
               )}
             </Button>
           </form>
@@ -336,7 +365,7 @@ function LoginForm() {
             variant="outline"
             onClick={() => loginWithGoogle()}
             disabled={isGoogleLoading || isSubmitting || isSuccess}
-            className="w-full h-[clamp(2.5rem,5dvh,2.75rem)] bg-secondary/70 text-foreground hover:bg-accent border-border font-bold text-sm"
+            className="w-full h-[clamp(2.5rem,5dvh,2.75rem)] bg-secondary/70 text-foreground hover:bg-accent border-border font-bold text-sm cursor-pointer"
           >
             {isGoogleLoading ? (
               <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 mr-2 animate-spin" />

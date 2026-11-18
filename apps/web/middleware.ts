@@ -1,5 +1,9 @@
+// C:\Projects\animanga-platform\apps\web\middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+
+const PROD_AUTH_COOKIE_NAME = "__Host-animanga_session";
+const DEV_AUTH_COOKIE_NAME = "animanga_session";
 
 const protectedRoutes = [
   "/dashboard",
@@ -19,26 +23,31 @@ export function middleware(request: NextRequest) {
     pathname.startsWith(route),
   );
 
-  const hasSession = request.cookies.has("animanga_access_token");
+  const hasSession =
+    Boolean(request.cookies.get(PROD_AUTH_COOKIE_NAME)?.value) ||
+    Boolean(request.cookies.get(DEV_AUTH_COOKIE_NAME)?.value);
 
-  // 1. The Auth Guard
+  // 1. Protect authenticated routes
   if (isProtectedRoute && !hasSession) {
     const url = new URL("/login", request.url);
     url.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(url);
   }
 
-  // 2. Redirect authenticated users away from auth pages
-  if ((pathname === "/login" || pathname === "/register") && hasSession) {
+  // 2. Redirect authenticated users away from auth pages (unless verifying a token)
+  const hasVerifyToken = request.nextUrl.searchParams.has("token");
+  if (
+    (pathname === "/login" || (pathname === "/register" && !hasVerifyToken)) &&
+    hasSession
+  ) {
     return NextResponse.redirect(new URL("/tickets", request.url));
   }
 
-  // Notice we completely removed the /api/v1 proxy block here.
   return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|assets).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|assets|fonts).*)",
   ],
 };
