@@ -29,6 +29,9 @@ import {
 import { useAuth } from "@/providers/auth-provider";
 import { cn } from "@/lib/utils";
 
+const PENDING_EMAIL_STORAGE_KEY = "animanga:pending_registration_email";
+const PENDING_CONTEXT_TOKEN_KEY = "animanga:pending_verification_token";
+
 const loginSchema = z.object({
   email: z
     .string()
@@ -56,8 +59,19 @@ interface ApiLoginResponse {
   error?: {
     code?: number | string;
     message?: string;
+    verificationContextToken?: string;
     errors?: Array<{ message: string }>;
   };
+}
+
+async function safeParseJson<T>(res: Response): Promise<T | null> {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
 }
 
 function LoginForm() {
@@ -69,14 +83,12 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [isUnverified, setIsUnverified] = useState(false);
-  const [unverifiedEmail, setUnverifiedEmail] = useState<string>("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const {
     register,
     handleSubmit,
-    watch,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -86,15 +98,11 @@ function LoginForm() {
     },
   });
 
-  const watchedEmail = watch("email", "");
-
   const onSubmit = async (data: LoginFormData) => {
     setApiError(null);
     setIsUnverified(false);
 
     try {
-      // Route through Next.js same-origin rewrite proxy (/api/v1/*) so Set-Cookie
-      // binds directly to animangaweb.vercel.app
       const res = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -102,27 +110,35 @@ function LoginForm() {
         body: JSON.stringify(data),
       });
 
-      const resData = (await res.json()) as ApiLoginResponse;
+      const resData = await safeParseJson<ApiLoginResponse>(res);
 
       if (!res.ok) {
         const errorMessage =
-          resData.error?.message ||
-          resData.message ||
-          "Invalid credentials. Please try again.";
+          resData?.error?.message ||
+          resData?.message ||
+          (res.status >= 500
+            ? "Server is temporarily busy. Please try again in a moment."
+            : "Invalid credentials. Please try again.");
 
         if (
           res.status === 401 &&
-          errorMessage.toLowerCase().includes("verify your email")
+          (resData?.error?.code === "EMAIL_NOT_VERIFIED" ||
+            errorMessage.toLowerCase().includes("verify your email"))
         ) {
           setIsUnverified(true);
-          setUnverifiedEmail(data.email.trim().toLowerCase());
           try {
             sessionStorage.setItem(
-              "animanga:pending_registration_email",
+              PENDING_EMAIL_STORAGE_KEY,
               data.email.trim().toLowerCase(),
             );
+            if (resData?.error?.verificationContextToken) {
+              sessionStorage.setItem(
+                PENDING_CONTEXT_TOKEN_KEY,
+                resData.error.verificationContextToken,
+              );
+            }
           } catch {
-            // Ignore sessionStorage errors
+            // Ignore storage errors
           }
           throw new Error("Your account requires email verification.");
         }
@@ -131,8 +147,11 @@ function LoginForm() {
       }
 
       const payload =
-        (resData as unknown as { data?: { data?: ApiLoginResponse["data"] } })
-          .data?.data || resData.data;
+        (
+          resData as unknown as {
+            data?: { data?: ApiLoginResponse["data"] };
+          }
+        )?.data?.data || resData?.data;
 
       if (payload) {
         updateUser({
@@ -171,17 +190,23 @@ function LoginForm() {
           }),
         });
 
-        const resData = (await res.json()) as ApiLoginResponse;
+        const resData = await safeParseJson<ApiLoginResponse>(res);
 
         if (!res.ok) {
           throw new Error(
-            resData.error?.message || "Google authentication failed.",
+            resData?.error?.message ||
+              (res.status >= 500
+                ? "Connection to authentication server timed out. Please try again."
+                : "Google authentication failed."),
           );
         }
 
         const payload =
-          (resData as unknown as { data?: { data?: ApiLoginResponse["data"] } })
-            .data?.data || resData.data;
+          (
+            resData as unknown as {
+              data?: { data?: ApiLoginResponse["data"] };
+            }
+          )?.data?.data || resData?.data;
 
         if (payload) {
           updateUser({
@@ -207,11 +232,6 @@ function LoginForm() {
       setApiError("Google Login was cancelled or failed.");
     },
   });
-
-  const targetStatusEmail = unverifiedEmail || watchedEmail.trim();
-  const statusHref = targetStatusEmail
-    ? `/register?status=check&email=${encodeURIComponent(targetStatusEmail)}`
-    : "/register?status=check";
 
   return (
     <div className="w-full max-w-md my-auto animate-in fade-in slide-from-bottom-4 duration-700 py-4">
@@ -264,10 +284,10 @@ function LoginForm() {
                   Password
                 </label>
                 <Link
-                  href={statusHref}
+                  href="/register?status=check"
                   className="text-[10px] sm:text-xs text-primary hover:underline font-semibold"
                 >
-                  Check registration status
+                  Didn&apos;t receive activation email?
                 </Link>
               </div>
               <div className="relative">
@@ -312,7 +332,7 @@ function LoginForm() {
                   folder.
                 </p>
                 <Link
-                  href={statusHref}
+                  href="/register?status=check"
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline w-fit pt-0.5"
                 >
                   <span>Check registration status &amp; resend link</span>

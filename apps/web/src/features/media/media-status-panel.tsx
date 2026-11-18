@@ -1,7 +1,7 @@
 // C:\Projects\animanga-platform\apps\web\src\features\media\media-status-panel.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Plus,
   Check,
@@ -10,8 +10,17 @@ import {
   ChevronDown,
   ChevronUp,
   Share2,
+  Heart,
+  Star,
+  Loader2,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useAuth } from "@/providers/auth-provider";
+import {
+  unwrapApiData,
+  type LibraryEntryDto,
+  type UserMediaStatus,
+} from "@/lib/api/types/library";
 import { cn } from "@/lib/utils";
 import type { MediaDetailDto } from "@/lib/api/types/media";
 
@@ -20,46 +29,170 @@ interface MediaStatusPanelProps {
   nextAiring?: { airingAt: number; episode: number } | null;
 }
 
-const LIST_STATUSES = [
-  { id: "PLANNING", animeLabel: "Plan to Watch", mangaLabel: "Plan to Read" },
+const LIST_STATUSES: Array<{
+  id: UserMediaStatus;
+  animeLabel: string;
+  mangaLabel: string;
+}> = [
   { id: "CURRENT", animeLabel: "Watching", mangaLabel: "Reading" },
+  { id: "PLANNING", animeLabel: "Plan to Watch", mangaLabel: "Plan to Read" },
   { id: "COMPLETED", animeLabel: "Completed", mangaLabel: "Completed" },
   { id: "PAUSED", animeLabel: "On Hold", mangaLabel: "On Hold" },
-] as const;
+  { id: "DROPPED", animeLabel: "Dropped", mangaLabel: "Dropped" },
+];
 
 export function MediaStatusPanel({ media, nextAiring }: MediaStatusPanelProps) {
+  const { isAuthenticated } = useAuth();
   const [timeLeft, setTimeLeft] = useState<string>("");
-  const [listStatus, setListStatus] = useState<string | null>(null);
+  const [listStatus, setListStatus] = useState<UserMediaStatus | null>(null);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [userScore, setUserScore] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [showListMenu, setShowListMenu] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [copied, setCopied] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const accentColor = media.colorHex || "var(--primary)";
   const resolvedNextAiring = nextAiring ?? media.airing?.nextEpisode ?? null;
   const upcomingSchedule = media.airing?.upcomingEpisodes || [];
+  const maxUnits = media.type === "MANGA" ? media.chapters : media.episodes;
+  const unitLabel = media.type === "MANGA" ? "Ch" : "Ep";
 
-  // Hydrate saved user list state from localStorage
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`animanga:list:${media.id}`);
-      if (saved) setListStatus(saved);
-    } catch {
-      // Ignore storage access errors
-    }
-  }, [media.id]);
+    const handleOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowListMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
 
-  const handleSelectListStatus = (statusId: string | null) => {
-    setListStatus(statusId);
-    setShowListMenu(false);
+  // Hydrate from cloud library if authenticated, or localStorage if guest
+  useEffect(() => {
+    let active = true;
+
+    const loadState = async () => {
+      if (isAuthenticated) {
+        try {
+          const res = await fetch(`/api/v1/library/${media.id}`, {
+            credentials: "include",
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const entry = unwrapApiData<LibraryEntryDto>(json);
+            if (active && entry) {
+              setListStatus(entry.status);
+              setIsFavorite(Boolean(entry.isFavorite));
+              setProgress(entry.progress || 0);
+              setUserScore(entry.score);
+              return;
+            }
+          }
+        } catch {
+          // Fallback to localStorage below
+        }
+      }
+
+      try {
+        const savedStatus = localStorage.getItem(`animanga:list:${media.id}`);
+        const savedFav = localStorage.getItem(`animanga:fav:${media.id}`);
+        if (active) {
+          if (savedStatus) setListStatus(savedStatus as UserMediaStatus);
+          if (savedFav === "true") setIsFavorite(true);
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    };
+
+    void loadState();
+    return () => {
+      active = false;
+    };
+  }, [media.id, isAuthenticated]);
+
+  const persistUpdate = async (updates: {
+    status?: UserMediaStatus | null;
+    isFavorite?: boolean;
+    progress?: number;
+    score?: number | null;
+  }) => {
+    const nextStatus =
+      updates.status !== undefined ? updates.status : listStatus;
+    const nextFav =
+      updates.isFavorite !== undefined ? updates.isFavorite : isFavorite;
+    const nextProgress =
+      updates.progress !== undefined ? updates.progress : progress;
+    const nextScore = updates.score !== undefined ? updates.score : userScore;
+
+    setListStatus(nextStatus);
+    setIsFavorite(nextFav);
+    setProgress(nextProgress);
+    setUserScore(nextScore);
+
     try {
-      if (statusId) {
-        localStorage.setItem(`animanga:list:${media.id}`, statusId);
+      if (nextStatus) {
+        localStorage.setItem(`animanga:list:${media.id}`, nextStatus);
       } else {
         localStorage.removeItem(`animanga:list:${media.id}`);
       }
+      if (nextFav) {
+        localStorage.setItem(`animanga:fav:${media.id}`, "true");
+      } else {
+        localStorage.removeItem(`animanga:fav:${media.id}`);
+      }
     } catch {
-      // Ignore storage access errors
+      // Ignore storage errors
     }
+
+    if (!isAuthenticated) return;
+
+    setIsSaving(true);
+    try {
+      const res = await fetch(`/api/v1/library/${media.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          status: nextStatus,
+          isFavorite: nextFav,
+          progress: nextProgress,
+          score: nextScore,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const saved = unwrapApiData<LibraryEntryDto>(json);
+        if (saved) {
+          setListStatus(saved.status);
+          setIsFavorite(saved.isFavorite);
+          setProgress(saved.progress);
+          setUserScore(saved.score);
+        }
+      }
+    } catch {
+      // Ignore network hiccup; localStorage already updated
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSelectListStatus = (statusId: UserMediaStatus | null) => {
+    setShowListMenu(false);
+    const autoProgress =
+      statusId === "COMPLETED" && maxUnits ? maxUnits : progress;
+    void persistUpdate({ status: statusId, progress: autoProgress });
+  };
+
+  const handleIncrementProgress = () => {
+    const nextVal = maxUnits ? Math.min(maxUnits, progress + 1) : progress + 1;
+    const nextStatus =
+      maxUnits && nextVal >= maxUnits ? "COMPLETED" : listStatus || "CURRENT";
+    void persistUpdate({ progress: nextVal, status: nextStatus });
   };
 
   const handleShare = async () => {
@@ -127,14 +260,17 @@ export function MediaStatusPanel({ media, nextAiring }: MediaStatusPanelProps) {
     <div className="w-full bg-card/90 border border-border backdrop-blur-2xl rounded-2xl p-4 md:p-5 shadow-xl flex flex-col gap-4">
       <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
         {/* Left: Primary Actions */}
-        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
-          <div className="relative flex-1 sm:flex-initial">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full lg:w-auto">
+          {/* Status Dropdown Button */}
+          <div ref={menuRef} className="relative flex-1 sm:flex-initial">
             <Button
               type="button"
               onClick={() => setShowListMenu((prev) => !prev)}
-              className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground h-11 md:h-12 px-6 rounded-xl font-bold text-sm md:text-base shadow-md gap-2 cursor-pointer"
+              className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground h-11 md:h-12 px-5 rounded-xl font-bold text-sm md:text-base shadow-md gap-2 cursor-pointer"
             >
-              {listStatus ? (
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : listStatus ? (
                 <Check className="w-4 h-4" />
               ) : (
                 <Plus className="w-4 h-4" />
@@ -144,7 +280,7 @@ export function MediaStatusPanel({ media, nextAiring }: MediaStatusPanelProps) {
             </Button>
 
             {showListMenu && (
-              <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-48 rounded-xl bg-popover border border-border shadow-xl p-1.5 flex flex-col gap-1 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-52 rounded-xl bg-popover border border-border shadow-xl p-1.5 flex flex-col gap-1 animate-in fade-in slide-in-from-top-1 duration-150">
                 {LIST_STATUSES.map((st) => {
                   const label =
                     media.type === "MANGA" ? st.mangaLabel : st.animeLabel;
@@ -179,6 +315,71 @@ export function MediaStatusPanel({ media, nextAiring }: MediaStatusPanelProps) {
             )}
           </div>
 
+          {/* Favorite Heart Button */}
+          <Button
+            type="button"
+            variant="outline"
+            aria-label={
+              isFavorite ? "Remove from favorites" : "Add to favorites"
+            }
+            onClick={() => void persistUpdate({ isFavorite: !isFavorite })}
+            className={cn(
+              "h-11 md:h-12 px-4 rounded-xl font-bold text-xs sm:text-sm gap-2 border cursor-pointer transition-all",
+              isFavorite
+                ? "bg-destructive/15 border-destructive/40 text-destructive hover:bg-destructive/20"
+                : "bg-secondary/50 border-border text-foreground hover:bg-accent",
+            )}
+          >
+            <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
+            <span className="hidden sm:inline">
+              {isFavorite ? "Favorited" : "Favorite"}
+            </span>
+          </Button>
+
+          {/* Inline Progress Tracker & +1 Incrementor (Visible when in list or favorited) */}
+          {(listStatus || progress > 0) && (
+            <div className="flex items-center gap-1.5 px-3 h-11 md:h-12 rounded-xl bg-secondary/70 border border-border">
+              <span className="text-xs font-black text-foreground tabular-nums">
+                {unitLabel} {progress}
+                {maxUnits ? ` / ${maxUnits}` : ""}
+              </span>
+              {(!maxUnits || progress < maxUnits) && (
+                <button
+                  type="button"
+                  onClick={handleIncrementProgress}
+                  title={`Increment ${unitLabel}`}
+                  className="ml-1 px-2 py-1 rounded-lg bg-primary/15 hover:bg-primary text-primary hover:text-primary-foreground text-[11px] font-black transition-colors cursor-pointer"
+                >
+                  +1
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Personal Rating Selector */}
+          {(listStatus || isFavorite) && (
+            <div className="relative flex items-center">
+              <Star className="w-3.5 h-3.5 text-warning fill-current absolute left-3 pointer-events-none" />
+              <select
+                aria-label="Your score"
+                value={userScore ?? ""}
+                onChange={(e) =>
+                  void persistUpdate({
+                    score: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+                className="h-11 md:h-12 pl-8 pr-3 rounded-xl bg-secondary/70 border border-border text-xs font-bold text-foreground cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="">Rate ★</option>
+                {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((s) => (
+                  <option key={s} value={s}>
+                    {s} / 10 ★
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {trailerUrl && (
             <a
               href={trailerUrl}
@@ -186,10 +387,10 @@ export function MediaStatusPanel({ media, nextAiring }: MediaStatusPanelProps) {
               rel="noopener noreferrer"
               className={cn(
                 buttonVariants({ variant: "outline" }),
-                "flex-1 sm:flex-initial bg-secondary/60 hover:bg-accent border-border text-foreground h-11 md:h-12 px-5 rounded-xl font-bold text-sm md:text-base",
+                "bg-secondary/60 hover:bg-accent border-border text-foreground h-11 md:h-12 px-4 rounded-xl font-bold text-xs sm:text-sm",
               )}
             >
-              <Play className="w-4 h-4 mr-2 fill-current text-primary" /> Watch
+              <Play className="w-4 h-4 mr-1.5 fill-current text-primary" />{" "}
               Trailer
             </a>
           )}
@@ -198,11 +399,11 @@ export function MediaStatusPanel({ media, nextAiring }: MediaStatusPanelProps) {
             type="button"
             variant="outline"
             onClick={() => void handleShare()}
-            className="h-11 md:h-12 px-4 rounded-xl font-bold text-xs sm:text-sm bg-secondary/40 hover:bg-accent border-border gap-2 cursor-pointer"
+            className="h-11 md:h-12 px-3.5 rounded-xl font-bold text-xs sm:text-sm bg-secondary/40 hover:bg-accent border-border gap-1.5 cursor-pointer"
           >
             {copied ? (
               <>
-                <Check className="w-4 h-4 text-emerald-500" />
+                <Check className="w-4 h-4 text-success" />
                 <span>Copied</span>
               </>
             ) : (

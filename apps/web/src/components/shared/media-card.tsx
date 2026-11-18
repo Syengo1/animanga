@@ -1,7 +1,11 @@
 // C:\Projects\animanga-platform\apps\web\src\components\shared\media-card.tsx
+"use client";
+
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Star, Tv, BookOpen } from "lucide-react";
+import { Star, Tv, BookOpen, Bookmark, Check, Heart } from "lucide-react";
+import { useAuth } from "@/providers/auth-provider";
 import { cn } from "@/lib/utils";
 
 export interface MediaCardData {
@@ -54,11 +58,90 @@ export function MediaCard({
   accentOverride,
   className,
 }: MediaCardProps) {
+  const { isAuthenticated } = useAuth();
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+
   const inferredType: "anime" | "manga" =
     media.format && MANGA_FORMAT_SET.has(media.format.toUpperCase())
       ? "manga"
       : "anime";
   const activeType = mediaType || type || inferredType;
+
+  useEffect(() => {
+    try {
+      const savedStatus = localStorage.getItem(`animanga:list:${media.id}`);
+      const savedFav = localStorage.getItem(`animanga:fav:${media.id}`);
+      if (savedStatus) setIsBookmarked(true);
+      if (savedFav === "true") setIsFavorite(true);
+    } catch {
+      // Ignore storage error
+    }
+  }, [media.id]);
+
+  const handleQuickBookmark = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const nextBookmarked = !isBookmarked;
+    setIsBookmarked(nextBookmarked);
+
+    try {
+      if (nextBookmarked) {
+        localStorage.setItem(`animanga:list:${media.id}`, "PLANNING");
+      } else {
+        localStorage.removeItem(`animanga:list:${media.id}`);
+      }
+    } catch {
+      // Ignore
+    }
+
+    if (isAuthenticated) {
+      try {
+        await fetch(`/api/v1/library/${media.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            status: nextBookmarked ? "PLANNING" : null,
+          }),
+        });
+      } catch {
+        // Ignore network error
+      }
+    }
+  };
+
+  const handleQuickFavorite = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const nextFav = !isFavorite;
+    setIsFavorite(nextFav);
+
+    try {
+      if (nextFav) {
+        localStorage.setItem(`animanga:fav:${media.id}`, "true");
+      } else {
+        localStorage.removeItem(`animanga:fav:${media.id}`);
+      }
+    } catch {
+      // Ignore
+    }
+
+    if (isAuthenticated) {
+      try {
+        await fetch(`/api/v1/library/${media.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ isFavorite: nextFav }),
+        });
+      } catch {
+        // Ignore network error
+      }
+    }
+  };
 
   const title =
     media.title?.english ||
@@ -127,7 +210,7 @@ export function MediaCard({
           )}
 
           {media.format && (
-            <div className="bg-cinema/80 backdrop-blur-md px-1.5 py-0.5 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cinema-foreground/90 border border-cinema-foreground/10">
+            <div className="bg-cinema/80 backdrop-blur-md px-1.5 py-0.5 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cinema-foreground/90 border border-cinema-foreground/10 group-hover:opacity-0 transition-opacity">
               {activeType === "anime" ? (
                 <Tv className="w-2.5 h-2.5 text-primary" />
               ) : (
@@ -136,6 +219,54 @@ export function MediaCard({
               <span>{String(media.format).replace(/_/g, " ")}</span>
             </div>
           )}
+        </div>
+
+        {/* Hover Quick-Action Buttons: Bookmark & Favorite */}
+        <div
+          className={cn(
+            "absolute top-2 right-2 z-20 flex items-center gap-1 transition-all duration-200",
+            isBookmarked || isFavorite
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100",
+          )}
+        >
+          <button
+            type="button"
+            onClick={(e) => void handleQuickFavorite(e)}
+            aria-label={
+              isFavorite ? "Remove from favorites" : "Add to favorites"
+            }
+            title={isFavorite ? "Favorited" : "Add to Favorites"}
+            className={cn(
+              "size-7 rounded-lg backdrop-blur-md flex items-center justify-center border transition-transform hover:scale-110 cursor-pointer",
+              isFavorite
+                ? "bg-destructive text-destructive-foreground border-destructive shadow-md"
+                : "bg-cinema/85 text-cinema-foreground border-cinema-foreground/20 hover:bg-cinema",
+            )}
+          >
+            <Heart
+              className={cn("w-3.5 h-3.5", isFavorite && "fill-current")}
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => void handleQuickBookmark(e)}
+            aria-label={isBookmarked ? "Remove from list" : "Add to list"}
+            title={isBookmarked ? "Saved in My List" : "Quick Save to List"}
+            className={cn(
+              "size-7 rounded-lg backdrop-blur-md flex items-center justify-center border transition-transform hover:scale-110 cursor-pointer",
+              isBookmarked
+                ? "bg-primary text-primary-foreground border-primary shadow-md"
+                : "bg-cinema/85 text-cinema-foreground border-cinema-foreground/20 hover:bg-cinema",
+            )}
+          >
+            {isBookmarked ? (
+              <Check className="w-3.5 h-3.5" />
+            ) : (
+              <Bookmark className="w-3.5 h-3.5" />
+            )}
+          </button>
         </div>
 
         {/* Optional Relation / Context Badge */}

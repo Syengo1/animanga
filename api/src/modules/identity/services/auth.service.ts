@@ -34,6 +34,7 @@ export interface RegisterResult {
   id: string;
   username: string;
   email: string;
+  verificationContextToken: string;
   message: string;
 }
 
@@ -59,29 +60,32 @@ export interface GoogleLoginResult {
 }
 
 export interface RegistrationStatusResult {
-  exists: boolean;
-  status: UserStatus | 'NOT_FOUND';
+  status: UserStatus;
   email: string;
-  username?: string;
-  emailVerifiedAt?: string | null;
-  registeredAt?: string;
+  username: string;
+  emailVerifiedAt: string | null;
+  registeredAt: string;
   message: string;
 }
 
 export interface ResendVerificationResult {
-  alreadyVerified: boolean;
   email: string;
   message: string;
 }
 
-// Valid PHC-formatted Argon2id hash (16-byte salt, 32-byte digest, m=19456, t=2, p=1)
-// Ensures argon2.verify() executes the full memory-hard computation when a user is not found
+interface VerificationContextPayload {
+  uid: string;
+  email: string;
+  exp: number;
+}
+
 const DUMMY_ARGON2_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$YW5pbWFuZ2Ffc2FsdF8xNg$YW5pbWFuZ2FfZHVtbXlfaGFzaF8zMl9ieXRlc19rZXk';
 
-const RESEND_COOLDOWN_MS = 45 * 1000; // 45-second minimum interval between token generations
-const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const OUTBOX_FAST_PATH_GRACE_MS = 15 * 1000; // 15-second head start before Outbox worker retries
+const RESEND_COOLDOWN_MS = 45 * 1000;
+const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const CONTEXT_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const OUTBOX_FAST_PATH_GRACE_MS = 15 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -91,6 +95,12 @@ export class AuthService {
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
   );
+
+  // Per-boot fallback secret if AUTH_CONTEXT_SECRET is not set in .env
+  private readonly contextSecret =
+    process.env.AUTH_CONTEXT_SECRET ||
+    process.env.GOOGLE_CLIENT_SECRET ||
+    'animanga-verification-context-secret-key';
 
   constructor(
     @InjectRepository(User)
@@ -115,6 +125,37 @@ export class AuthService {
     }
   }
 
+  private isTransientDbError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('connection terminated unexpectedly') ||
+      msg.includes('connection reset') ||
+      msg.includes('econnreset') ||
+      msg.includes('etimedout') ||
+      msg.includes('client has encountered a connection error')
+    );
+  }
+
+  /**
+   * Transparently retries a database operation once if the cloud pooler
+   * severed an idle socket right before the request arrived.
+   */
+  private async withDbRetry<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      if (this.isTransientDbError(error)) {
+        this.logger.warn(
+          'Transient DB socket reset detected in AuthService; retrying on a fresh connection...',
+        );
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return await operation();
+      }
+      throw error;
+    }
+  }
+
   private isPgUniqueViolation(
     error: unknown,
   ): error is { code: string; detail?: string; constraint?: string } {
@@ -124,6 +165,65 @@ export class AuthService {
       'code' in error &&
       (error as { code?: unknown }).code === '23505'
     );
+  }
+
+  /**
+   * Issues a short-lived HMAC-SHA256 signed token proving the caller either
+   * just created this account or authenticated with its valid password.
+   */
+  private createVerificationContextToken(
+    userId: string,
+    email: string,
+  ): string {
+    const payload: VerificationContextPayload = {
+      uid: userId,
+      email: email.toLowerCase(),
+      exp: Date.now() + CONTEXT_TOKEN_TTL_MS,
+    };
+    const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signature = crypto
+      .createHmac('sha256', this.contextSecret)
+      .update(encoded)
+      .digest('base64url');
+    return `${encoded}.${signature}`;
+  }
+
+  private verifyContextToken(token: string): VerificationContextPayload {
+    const parts = token.trim().split('.');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      throw new UnauthorizedException('Invalid verification session token');
+    }
+
+    const [encoded, providedSig] = parts;
+    const expectedSig = crypto
+      .createHmac('sha256', this.contextSecret)
+      .update(encoded)
+      .digest('base64url');
+
+    const providedBuf = Buffer.from(providedSig);
+    const expectedBuf = Buffer.from(expectedSig);
+
+    if (
+      providedBuf.length !== expectedBuf.length ||
+      !crypto.timingSafeEqual(providedBuf, expectedBuf)
+    ) {
+      throw new UnauthorizedException('Invalid verification session signature');
+    }
+
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(encoded, 'base64url').toString('utf8'),
+      ) as VerificationContextPayload;
+
+      if (!parsed.uid || !parsed.email || Date.now() > parsed.exp) {
+        throw new UnauthorizedException('Verification status session expired');
+      }
+
+      return parsed;
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('Malformed verification session token');
+    }
   }
 
   private extractRolesAndPermissions(user: User): {
@@ -163,10 +263,12 @@ export class AuthService {
       `${prefix}${crypto.randomInt(10, 99)}`,
     ];
 
-    const takenUsers = await this.userRepo.find({
-      where: { username: In(candidates) },
-      select: { username: true },
-    });
+    const takenUsers = await this.withDbRetry(() =>
+      this.userRepo.find({
+        where: { username: In(candidates) },
+        select: { username: true },
+      }),
+    );
 
     const takenSet = new Set(takenUsers.map((u) => u.username));
     return candidates.filter((c) => !takenSet.has(c)).slice(0, 4);
@@ -175,9 +277,11 @@ export class AuthService {
   async register(input: RegisterInput): Promise<RegisterResult> {
     const normalizedEmail = input.email.trim().toLowerCase();
 
-    const emailExists = await this.userRepo.exists({
-      where: { email: normalizedEmail },
-    });
+    const emailExists = await this.withDbRetry(() =>
+      this.userRepo.exists({
+        where: { email: normalizedEmail },
+      }),
+    );
 
     if (emailExists) {
       throw new ConflictException('Email is already registered');
@@ -188,9 +292,11 @@ export class AuthService {
     if (!finalUsername) {
       finalUsername = `user_${crypto.randomBytes(4).toString('hex')}`;
     } else {
-      const usernameExists = await this.userRepo.exists({
-        where: { username: finalUsername },
-      });
+      const usernameExists = await this.withDbRetry(() =>
+        this.userRepo.exists({
+          where: { username: finalUsername },
+        }),
+      );
 
       if (usernameExists) {
         const suggestions =
@@ -264,7 +370,6 @@ export class AuthService {
 
       await queryRunner.commitTransaction();
 
-      // Immediate fast-path email delivery (Outbox worker acts as guaranteed retry fallback)
       this.emailService
         .sendVerificationEmail(savedUser.email, rawToken, dedupKey)
         .then(() =>
@@ -296,10 +401,16 @@ export class AuthService {
       await queryRunner.release();
     }
 
+    const verificationContextToken = this.createVerificationContextToken(
+      savedUser.id,
+      savedUser.email,
+    );
+
     return {
       id: savedUser.id,
       username: savedUser.username,
       email: savedUser.email,
+      verificationContextToken,
       message:
         'Registration initiated. Please check your email to verify your account.',
     };
@@ -327,7 +438,6 @@ export class AuthService {
     let welcomeDedupKey = '';
 
     try {
-      // Lock the token row so concurrent clicks or browser link prefetches cannot race
       const verificationRecord = await queryRunner.manager.findOne(
         EmailVerificationToken,
         {
@@ -358,7 +468,6 @@ export class AuthService {
         });
       }
 
-      // Mark the current token and any older unused tokens for this user as consumed
       await queryRunner.manager.query(
         `UPDATE identity.email_verification_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
         [verificationRecord.user.id],
@@ -393,7 +502,6 @@ export class AuthService {
 
       await queryRunner.commitTransaction();
 
-      // Immediate non-blocking welcome email dispatch
       this.emailService
         .sendWelcomeEmail(verifiedEmail, verifiedUsername, welcomeDedupKey)
         .then(() =>
@@ -427,20 +535,20 @@ export class AuthService {
   ): Promise<LoginResult> {
     const normalizedEmail = input.email.trim().toLowerCase();
 
-    const user = await this.userRepo.findOne({
-      where: { email: normalizedEmail },
-      relations: {
-        passwordCredential: true,
-        roleAssignments: {
-          role: {
-            permissions: true,
+    const user = await this.withDbRetry(() =>
+      this.userRepo.findOne({
+        where: { email: normalizedEmail },
+        relations: {
+          passwordCredential: true,
+          roleAssignments: {
+            role: {
+              permissions: true,
+            },
           },
         },
-      },
-    });
+      }),
+    );
 
-    // Constant-time Argon2id verification: always verify against a real or dummy hash
-    // BEFORE checking account status to prevent user/status enumeration attacks
     const targetHash =
       user?.passwordCredential?.passwordHash || DUMMY_ARGON2_HASH;
     let isPasswordValid = false;
@@ -455,10 +563,18 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Because password verification succeeded above, the caller has proven ownership
+    // of this account. Issue a signed verificationContextToken so they can view status.
     if (user.status === UserStatus.PENDING_EMAIL_VERIFICATION) {
-      throw new UnauthorizedException(
-        'Please verify your email address before logging in.',
+      const verificationContextToken = this.createVerificationContextToken(
+        user.id,
+        user.email,
       );
+      throw new UnauthorizedException({
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Please verify your email address before logging in.',
+        verificationContextToken,
+      });
     }
 
     if (user.status !== UserStatus.ACTIVE) {
@@ -536,10 +652,9 @@ export class AuthService {
     const givenName = payload.given_name;
     const familyName = payload.family_name;
 
-    // CASE 1: Returning Google User
-    const existingIdentity = await this.dataSource.manager.findOne(
-      ExternalIdentity,
-      {
+    // CASE 1: Returning Google User (with transient DB retry for idle pool sockets)
+    const existingIdentity = await this.withDbRetry(() =>
+      this.dataSource.manager.findOne(ExternalIdentity, {
         where: { provider: IdentityProvider.GOOGLE, providerSubject: sub },
         relations: {
           user: {
@@ -550,7 +665,7 @@ export class AuthService {
             },
           },
         },
-      },
+      }),
     );
 
     if (existingIdentity) {
@@ -575,10 +690,12 @@ export class AuthService {
       };
     }
 
-    // CASE 2: Account Conflict (Email exists but no Google Identity linked)
-    const existingUser = await this.userRepo.findOne({
-      where: { email: normalizedEmail },
-    });
+    // CASE 2: Existing User with the same verified email -> Auto-link or conflict
+    const existingUser = await this.withDbRetry(() =>
+      this.userRepo.findOne({
+        where: { email: normalizedEmail },
+      }),
+    );
     if (existingUser) {
       throw new ConflictException({
         code: 'ACCOUNT_EXISTS',
@@ -708,7 +825,6 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Ensure this Google identity is not already linked to any account
       const existingIdentity = await queryRunner.manager.findOne(
         ExternalIdentity,
         {
@@ -728,7 +844,6 @@ export class AuthService {
         );
       }
 
-      // 2. Prevent linking a Google email that belongs to a different user's primary account
       const conflictingEmailOwner = await queryRunner.manager.findOne(User, {
         where: { email: normalizedEmail },
         select: { id: true },
@@ -769,37 +884,37 @@ export class AuthService {
     }
   }
 
-  async checkRegistrationStatus(
-    rawEmail: string,
+  /**
+   * SECURE STATUS CHECK (Zero Enumeration):
+   * Requires a cryptographically signed `contextToken` issued either during
+   * registration or after verifying the user's password during login.
+   */
+  async getVerificationStatusByToken(
+    contextToken: string,
   ): Promise<RegistrationStatusResult> {
-    const email = rawEmail?.trim().toLowerCase();
-    if (!email || !email.includes('@')) {
-      throw new BadRequestException('A valid email address is required');
-    }
+    const claims = this.verifyContextToken(contextToken);
 
-    const user = await this.userRepo.findOne({
-      where: { email },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        status: true,
-        emailVerifiedAt: true,
-        createdAt: true,
-      },
-    });
+    const user = await this.withDbRetry(() =>
+      this.userRepo.findOne({
+        where: { id: claims.uid, email: claims.email },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          status: true,
+          emailVerifiedAt: true,
+          createdAt: true,
+        },
+      }),
+    );
 
     if (!user) {
-      return {
-        exists: false,
-        status: 'NOT_FOUND',
-        email,
-        message: 'No account found with this email address.',
-      };
+      throw new UnauthorizedException(
+        'Verification session is no longer valid',
+      );
     }
 
     return {
-      exists: true,
       status: user.status,
       email: user.email,
       username: user.username,
@@ -808,10 +923,15 @@ export class AuthService {
       message:
         user.status === UserStatus.ACTIVE
           ? 'Your account is verified and active. You can sign in now.'
-          : 'Your account is registered and awaiting email verification. Please check your inbox and spam folder.',
+          : 'Your account is awaiting email verification. Please check your inbox and spam folder.',
     };
   }
 
+  /**
+   * ZERO-ENUMERATION RESEND:
+   * Always returns an identical 200 OK response regardless of whether the email
+   * exists, is already verified, or is pending verification.
+   */
   async resendVerificationEmail(
     rawEmail: string,
   ): Promise<ResendVerificationResult> {
@@ -820,26 +940,24 @@ export class AuthService {
       throw new BadRequestException('A valid email address is required');
     }
 
-    const user = await this.userRepo.findOne({ where: { email } });
-    if (!user) {
-      throw new BadRequestException('No account found with this email address');
-    }
+    const uniformResponse: ResendVerificationResult = {
+      email,
+      message:
+        'If an unverified account is associated with this email, a fresh activation link has been sent. Please check your inbox and spam folder.',
+    };
 
-    if (user.status === UserStatus.ACTIVE) {
-      return {
-        alreadyVerified: true,
-        email: user.email,
-        message: 'This account is already verified. Please proceed to login.',
-      };
-    }
+    const user = await this.withDbRetry(() =>
+      this.userRepo.findOne({ where: { email } }),
+    );
 
-    if (user.status !== UserStatus.PENDING_EMAIL_VERIFICATION) {
-      throw new BadRequestException(
-        'This account is suspended or cannot receive verification emails.',
+    // If user doesn't exist or is already active/suspended, add small jitter and return uniform message
+    if (!user || user.status !== UserStatus.PENDING_EMAIL_VERIFICATION) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, crypto.randomInt(120, 260)),
       );
+      return uniformResponse;
     }
 
-    // Enforce database-level cooldown so rapid clicks cannot flood SMTP
     const mostRecentToken = await this.dataSource.manager.findOne(
       EmailVerificationToken,
       {
@@ -848,18 +966,12 @@ export class AuthService {
       },
     );
 
+    // Silently enforce cooldown without revealing account existence
     if (
       mostRecentToken &&
       Date.now() - mostRecentToken.createdAt.getTime() < RESEND_COOLDOWN_MS
     ) {
-      const waitSec = Math.ceil(
-        (RESEND_COOLDOWN_MS -
-          (Date.now() - mostRecentToken.createdAt.getTime())) /
-          1000,
-      );
-      throw new BadRequestException(
-        `Please wait ${waitSec} seconds before requesting another verification link.`,
-      );
+      return uniformResponse;
     }
 
     const rawToken = crypto.randomBytes(32).toString('hex');
@@ -874,13 +986,11 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Invalidate all previous unused tokens for this user
       await queryRunner.manager.query(
         `UPDATE identity.email_verification_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
         [user.id],
       );
 
-      // 2. Save the new 24-hour verification token
       const verificationToken = queryRunner.manager.create(
         EmailVerificationToken,
         {
@@ -891,7 +1001,6 @@ export class AuthService {
       );
       await queryRunner.manager.save(verificationToken);
 
-      // 3. Persist OutboxMessage so delivery is guaranteed even if fast-path SMTP hiccups
       const outboxMsg = queryRunner.manager.create(OutboxMessage, {
         aggregateType: 'USER',
         aggregateId: user.id,
@@ -914,35 +1023,25 @@ export class AuthService {
         'Failed to rotate verification token',
         this.formatError(error),
       );
-      throw new InternalServerErrorException(
-        'Failed to generate a new verification token',
-      );
+      return uniformResponse;
     } finally {
       await queryRunner.release();
     }
 
-    // Immediate fast-path SMTP delivery (updates Outbox row to PUBLISHED on success)
-    try {
-      await this.emailService.sendVerificationEmail(
-        user.email,
-        rawToken,
-        dedupKey,
-      );
-      await this.dataSource.query(
-        `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
-        [OutboxStatus.PUBLISHED, dedupKey],
-      );
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Immediate resend email deferred to Outbox worker: ${this.formatError(err)}`,
-      );
-    }
+    this.emailService
+      .sendVerificationEmail(user.email, rawToken, dedupKey)
+      .then(() =>
+        this.dataSource.query(
+          `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
+          [OutboxStatus.PUBLISHED, dedupKey],
+        ),
+      )
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `Immediate resend email deferred to Outbox worker: ${this.formatError(err)}`,
+        );
+      });
 
-    return {
-      alreadyVerified: false,
-      email: user.email,
-      message:
-        'A fresh verification link has been sent. Please check your inbox and spam folder.',
-    };
+    return uniformResponse;
   }
 }

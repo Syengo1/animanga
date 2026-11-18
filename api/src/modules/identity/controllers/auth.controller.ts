@@ -87,16 +87,14 @@ export class AuthController {
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
-  async register(
-    @Body(new ZodValidationPipe(RegisterSchema)) body: RegisterInput,
-  ) {
+  register(@Body(new ZodValidationPipe(RegisterSchema)) body: RegisterInput) {
     return this.authService.register(body);
   }
 
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('verify')
   @HttpCode(HttpStatus.OK)
-  async verifyEmail(@Body('token') token?: string) {
+  verifyEmail(@Body('token') token?: string) {
     if (typeof token !== 'string' || !token.trim()) {
       throw new BadRequestException({
         code: 'VERIFICATION_TOKEN_INVALID',
@@ -172,20 +170,20 @@ export class AuthController {
 
   @Throttle({ default: { limit: 15, ttl: 60000 } })
   @Get('status')
-  async getRegistrationStatus(@Query('email') rawEmail?: string | string[]) {
-    const emailStr = Array.isArray(rawEmail) ? rawEmail[0] : rawEmail;
-    if (typeof emailStr !== 'string' || !emailStr.trim()) {
+  getRegistrationStatus(@Query('contextToken') rawToken?: string | string[]) {
+    const tokenStr = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+    if (typeof tokenStr !== 'string' || !tokenStr.trim()) {
       throw new BadRequestException(
-        'A valid email query parameter is required',
+        'A valid verification context token is required',
       );
     }
-    return this.authService.checkRegistrationStatus(emailStr);
+    return this.authService.getVerificationStatusByToken(tokenStr.trim());
   }
 
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
-  async resendVerification(
+  resendVerification(
     @Body(new ZodValidationPipe(EmailLookupSchema)) body: EmailLookupInput,
   ) {
     return this.authService.resendVerificationEmail(body.email);

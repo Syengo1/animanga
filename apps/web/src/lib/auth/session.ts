@@ -8,6 +8,15 @@ export const DEV_AUTH_COOKIE_NAME = "animanga_session";
 export interface SessionUser {
   id: string;
   email: string;
+  username?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  status?: string;
+  emailVerifiedAt?: string | null;
+  createdAt?: string;
+  hasPassword?: boolean;
+  linkedProviders?: string[];
   roles: string[];
   permissions: string[];
 }
@@ -57,6 +66,15 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     return {
       id: data.id,
       email: data.email || "",
+      username: data.username || data.email?.split("@")[0] || "member",
+      firstName: data.firstName ?? null,
+      lastName: data.lastName ?? null,
+      phone: data.phone ?? null,
+      status: data.status || "ACTIVE",
+      emailVerifiedAt: data.emailVerifiedAt ?? null,
+      createdAt: data.createdAt,
+      hasPassword: Boolean(data.hasPassword),
+      linkedProviders: data.linkedProviders || [],
       roles: data.roles || [],
       permissions: data.permissions || [],
     };

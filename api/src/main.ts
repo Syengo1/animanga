@@ -16,7 +16,11 @@ async function bootstrap() {
   // Trust Proxy for Railway/Cloudflare load balancers (ensures accurate IP mapping for rate limits)
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    }),
+  );
   app.use(cookieParser()); // Fully type-safe, zero ESLint warnings
 
   // Strict CORS Configuration filtered safely

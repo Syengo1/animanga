@@ -429,6 +429,34 @@
         ]
       }
     },
+    "/api/v1/users/me/sessions": {
+      "get": {
+        "operationId": "UserController_getActiveSessions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      }
+    },
+    "/api/v1/users/me/sessions/others": {
+      "delete": {
+        "operationId": "UserController_revokeOtherSessions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "User"
+        ]
+      }
+    },
     "/api/v1/users/me/kyc": {
       "get": {
         "operationId": "UserController_getKycStatus",
@@ -822,6 +850,129 @@
         },
         "tags": [
           "Discovery"
+        ]
+      }
+    },
+    "/api/v1/library": {
+      "get": {
+        "operationId": "LibraryController_getUserLibrary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retrieve the authenticated user's Anime/Manga library, favorites, and affinity stats",
+        "tags": [
+          "Content - User Library & Favorites"
+        ]
+      }
+    },
+    "/api/v1/library/{mediaId}": {
+      "get": {
+        "operationId": "LibraryController_getEntryForMedia",
+        "parameters": [
+          {
+            "name": "mediaId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retrieve the authenticated user's library entry for a single media item",
+        "tags": [
+          "Content - User Library & Favorites"
+        ]
+      },
+      "put": {
+        "operationId": "LibraryController_upsertEntry",
+        "parameters": [
+          {
+            "name": "mediaId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add or update a media item in watchlist, reading list, or favorites",
+        "tags": [
+          "Content - User Library & Favorites"
+        ]
+      },
+      "delete": {
+        "operationId": "LibraryController_removeEntry",
+        "parameters": [
+          {
+            "name": "mediaId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a media item from the user library",
+        "tags": [
+          "Content - User Library & Favorites"
+        ]
+      }
+    },
+    "/api/v1/library/sync": {
+      "post": {
+        "operationId": "LibraryController_syncLocalEntries",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Bulk-sync local guest bookmarks into the authenticated user account",
+        "tags": [
+          "Content - User Library & Favorites"
         ]
       }
     }

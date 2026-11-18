@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../entities/user.entity';
+import { UpdateProfileInput } from '../schemas/user.schema';
 
 @Injectable()
 export class UserService {
@@ -15,6 +16,8 @@ export class UserService {
     const user = await this.userRepo.findOne({
       where: { id: userId },
       relations: {
+        passwordCredential: true,
+        externalIdentities: true,
         roleAssignments: {
           role: {
             permissions: true,
@@ -43,6 +46,10 @@ export class UserService {
       ),
     );
 
+    const linkedProviders = Array.from(
+      new Set((user.externalIdentities || []).map((ext) => ext.provider)),
+    );
+
     return {
       id: user.id,
       email: user.email,
@@ -53,8 +60,30 @@ export class UserService {
       status: user.status,
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
       createdAt: user.createdAt.toISOString(),
+      hasPassword: Boolean(user.passwordCredential),
+      linkedProviders,
       roles,
       permissions,
     };
+  }
+
+  async updateProfile(userId: string, input: UpdateProfileInput) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (input.firstName !== undefined) {
+      user.firstName = input.firstName.trim() || undefined;
+    }
+    if (input.lastName !== undefined) {
+      user.lastName = input.lastName.trim() || undefined;
+    }
+    if (input.phone !== undefined) {
+      user.phone = input.phone.trim() || undefined;
+    }
+
+    await this.userRepo.save(user);
+    return this.getProfileById(userId);
   }
 }

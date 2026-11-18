@@ -186,4 +186,56 @@ export class SessionService {
     );
     this.logger.log(`Revoked all sessions for user: ${userId}`);
   }
+
+  async listActiveSessions(userId: string, currentRawToken?: string) {
+    const currentHash =
+      currentRawToken && SESSION_TOKEN_REGEX.test(currentRawToken.trim())
+        ? this.hashToken(currentRawToken.trim())
+        : null;
+
+    const sessions = await this.sessionRepo.find({
+      where: {
+        user: { id: userId },
+        isRevoked: false,
+      },
+      order: { createdAt: 'DESC' },
+      take: 15,
+    });
+
+    const now = new Date();
+    return sessions
+      .filter((s) => s.expiresAt > now)
+      .map((s) => ({
+        id: s.id.slice(0, 16),
+        ipAddress: s.ipAddress ?? 'Unknown IP',
+        userAgent: s.userAgent ?? 'Unknown Device',
+        createdAt: s.createdAt.toISOString(),
+        expiresAt: s.expiresAt.toISOString(),
+        isCurrent: currentHash === s.id,
+      }));
+  }
+
+  async revokeOtherUserSessions(
+    userId: string,
+    currentRawToken?: string,
+  ): Promise<{ revokedCount: number }> {
+    const currentHash =
+      currentRawToken && SESSION_TOKEN_REGEX.test(currentRawToken.trim())
+        ? this.hashToken(currentRawToken.trim())
+        : null;
+
+    const qb = this.sessionRepo
+      .createQueryBuilder()
+      .update(Session)
+      .set({ isRevoked: true })
+      .where('user_id = :userId', { userId })
+      .andWhere('is_revoked = false');
+
+    if (currentHash) {
+      qb.andWhere('id != :currentHash', { currentHash });
+    }
+
+    const res = await qb.execute();
+    return { revokedCount: res.affected || 0 };
+  }
 }

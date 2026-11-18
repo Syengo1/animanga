@@ -6,14 +6,17 @@ import { MediaItem } from './entities/media-item.entity';
 import { MediaTrendSnapshot } from './entities/media-trend-snapshot.entity';
 import { MediaDiscoveryScore } from './entities/media-discovery-score.entity';
 import { MediaEditorialOverride } from './entities/media-editorial-override.entity';
+import { UserMediaEntry } from './entities/user-media-entry.entity';
 import { AniListAdapter } from './adapters/anilist/anilist.adapter';
 import { ContentSafetyService } from './services/content-safety.service';
 import { MediaDataService } from './services/media-data.service';
 import { DiscoveryScoringService } from './services/discovery-scoring.service';
 import { DiscoveryEngineService } from './services/discovery-engine.service';
 import { ContentBootstrapService } from './services/content-bootstrap.service';
+import { LibraryService } from './services/library.service';
 import { MediaController } from './controllers/media.controller';
 import { DiscoveryController } from './controllers/discovery.controller';
+import { LibraryController } from './controllers/library.controller';
 import { ContentSyncWorker } from './workers/content-sync.worker';
 
 @Module({
@@ -23,10 +26,11 @@ import { ContentSyncWorker } from './workers/content-sync.worker';
       MediaTrendSnapshot,
       MediaDiscoveryScore,
       MediaEditorialOverride,
+      UserMediaEntry,
     ]),
     BullModule.registerQueue({ name: 'content-sync' }),
   ],
-  controllers: [MediaController, DiscoveryController],
+  controllers: [MediaController, DiscoveryController, LibraryController],
   providers: [
     ContentSafetyService,
     AniListAdapter,
@@ -34,8 +38,14 @@ import { ContentSyncWorker } from './workers/content-sync.worker';
     DiscoveryScoringService,
     DiscoveryEngineService,
     ContentBootstrapService,
+    LibraryService,
     ContentSyncWorker,
   ],
-  exports: [MediaDataService, DiscoveryEngineService, ContentSafetyService],
+  exports: [
+    MediaDataService,
+    DiscoveryEngineService,
+    ContentSafetyService,
+    LibraryService,
+  ],
 })
 export class ContentModule {}
