@@ -2,7 +2,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import {
   LayoutDashboard,
   Bookmark,
@@ -48,20 +49,29 @@ const WORKSPACE_LINKS = [
   },
 ] as const;
 
-export function CustomerWorkspaceNav() {
+function WorkspaceNavInner() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
+
+  const isFavoritesTab =
+    pathname === "/library" && searchParams.get("tab") === "FAVORITES";
 
   const handle = user?.username || user?.email?.split("@")[0] || "member";
   const initial = handle.charAt(0).toUpperCase();
   const fullName =
     [user?.firstName, user?.lastName].filter(Boolean).join(" ") || `@${handle}`;
 
+  const checkActive = (href: string) => {
+    if (href.includes("?tab=FAVORITES")) return isFavoritesTab;
+    if (href === "/library") return pathname === "/library" && !isFavoritesTab;
+    return pathname === href || pathname?.startsWith(`${href}/`);
+  };
+
   return (
     <>
       {/* Desktop Sticky Sidebar Rail */}
       <aside className="hidden lg:flex lg:w-64 shrink-0 flex-col gap-5">
-        {/* Identity Summary Card */}
         <div className="p-5 rounded-2xl bg-card border border-border shadow-xs relative overflow-hidden">
           <div className="pointer-events-none absolute -top-10 -right-10 w-28 h-28 rounded-full bg-primary/15 blur-2xl" />
           <div className="flex items-center gap-3.5 relative z-10">
@@ -93,16 +103,12 @@ export function CustomerWorkspaceNav() {
           </div>
         </div>
 
-        {/* Vertical Navigation Links */}
         <nav
           aria-label="Customer Workspace Navigation"
           className="flex flex-col gap-1.5 p-2 rounded-2xl bg-card border border-border shadow-xs"
         >
           {WORKSPACE_LINKS.map(({ href, label, description, icon: Icon }) => {
-            const basePath = href.split("?")[0];
-            const isActive = href.includes("?tab=FAVORITES")
-              ? false
-              : pathname === basePath || pathname?.startsWith(`${basePath}/`);
+            const isActive = checkActive(href);
 
             return (
               <Link
@@ -142,31 +148,38 @@ export function CustomerWorkspaceNav() {
         </nav>
       </aside>
 
-      {/* Mobile & Tablet Horizontal Pill Bar */}
-      <div className="lg:hidden flex items-center gap-2 overflow-x-auto no-scrollbar pb-2 border-b border-border mb-4">
-        {WORKSPACE_LINKS.map(({ href, label, icon: Icon }) => {
-          const basePath = href.split("?")[0];
-          const isActive =
-            !href.includes("?") &&
-            (pathname === basePath || pathname?.startsWith(`${basePath}/`));
+      {/* Mobile & Tablet Constrained Horizontal Pill Bar */}
+      <div className="lg:hidden w-full max-w-full min-w-0 overflow-hidden border-b border-border pb-2.5 mb-1">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full">
+          {WORKSPACE_LINKS.map(({ href, label, icon: Icon }) => {
+            const isActive = checkActive(href);
 
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border shrink-0 transition-all",
-                isActive
-                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                  : "bg-card text-muted-foreground border-border hover:text-foreground",
-              )}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{label}</span>
-            </Link>
-          );
-        })}
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border shrink-0 transition-all",
+                  isActive
+                    ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                    : "bg-card text-muted-foreground border-border hover:text-foreground",
+                )}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                <span>{label}</span>
+              </Link>
+            );
+          })}
+        </div>
       </div>
     </>
+  );
+}
+
+export function CustomerWorkspaceNav() {
+  return (
+    <Suspense fallback={null}>
+      <WorkspaceNavInner />
+    </Suspense>
   );
 }

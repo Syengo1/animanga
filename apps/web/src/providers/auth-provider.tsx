@@ -9,7 +9,25 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import {
+  Heart,
+  Bookmark,
+  Star,
+  PlusCircle,
+  X,
+  Sparkles,
+  LogIn,
+  UserPlus,
+} from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import {
+  unwrapApiData,
+  type UserLibraryResponseDto,
+  type UserMediaStatus,
+} from "@/lib/api/types/library";
+import { cn } from "@/lib/utils";
 
 export interface AuthUser {
   id: string;
@@ -27,13 +45,29 @@ export interface AuthUser {
   permissions: string[];
 }
 
+export type AuthGateAction = "favorite" | "bookmark" | "rate" | "progress";
+
+export interface QuickLibrarySummary {
+  status: UserMediaStatus | null;
+  isFavorite: boolean;
+  progress: number;
+  score: number | null;
+}
+
 interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  libraryMap: Record<string, QuickLibrarySummary>;
   logout: () => Promise<void>;
   updateUser: (user: AuthUser | null) => void;
   refreshUser: () => Promise<void>;
+  refreshLibraryMap: () => Promise<void>;
+  setLocalLibraryItem: (
+    mediaId: string,
+    summary: Partial<QuickLibrarySummary> | null,
+  ) => void;
+  requireAuth: (action: AuthGateAction, targetTitle?: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -43,64 +77,184 @@ interface AuthProviderProps {
   initialUser: AuthUser | null;
 }
 
-const VALID_SYNC_STATUSES = new Set([
-  "CURRENT",
-  "PLANNING",
-  "COMPLETED",
-  "PAUSED",
-  "DROPPED",
-]);
+const GATE_COPY: Record<
+  AuthGateAction,
+  {
+    badge: string;
+    heading: string;
+    verb: string;
+    icon: typeof Heart;
+    iconColor: string;
+  }
+> = {
+  favorite: {
+    badge: "Members-Only Feature",
+    heading: "Sign in to Favorite Titles",
+    verb: "like and add to your Favorites",
+    icon: Heart,
+    iconColor: "text-destructive",
+  },
+  bookmark: {
+    badge: "Personal Watchlist & Library",
+    heading: "Sign in to Save to Your List",
+    verb: "bookmark and track in your personal library",
+    icon: Bookmark,
+    iconColor: "text-primary",
+  },
+  rate: {
+    badge: "Community Ratings & Reviews",
+    heading: "Sign in to Rate Episodes & Titles",
+    verb: "score episodes and build your affinity profile",
+    icon: Star,
+    iconColor: "text-warning",
+  },
+  progress: {
+    badge: "Episode & Chapter Tracker",
+    heading: "Sign in to Track Your Progress",
+    verb: "log watched episodes and read chapters across devices",
+    icon: PlusCircle,
+    iconColor: "text-success",
+  },
+};
 
 export function AuthProvider({ children, initialUser }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(initialUser);
   const [isLoading, setIsLoading] = useState(false);
-  const router = useRouter();
+  const [libraryMap, setLibraryMap] = useState<
+    Record<string, QuickLibrarySummary>
+  >({});
+  const [authModal, setAuthModal] = useState<{
+    isOpen: boolean;
+    action: AuthGateAction;
+    targetTitle?: string;
+  }>({
+    isOpen: false,
+    action: "bookmark",
+  });
 
-  // Sync server-rendered initialUser when Next.js router refreshes
+  const router = useRouter();
+  const pathname = usePathname();
+
   useEffect(() => {
     setUser(initialUser);
   }, [initialUser]);
 
-  // Automatically sync any guest localStorage bookmarks to PostgreSQL upon login
+  // Close auth modal automatically on route change or Escape key
   useEffect(() => {
-    if (!user?.id) return;
+    setAuthModal((prev) => (prev.isOpen ? { ...prev, isOpen: false } : prev));
+  }, [pathname]);
 
-    const syncLocalBookmarks = async () => {
-      try {
-        const entriesToSync: Array<{ mediaId: string; status: string }> = [];
-        const keysToRemove: string[] = [];
-
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith("animanga:list:")) {
-            const mediaId = key.replace("animanga:list:", "").trim();
-            const val = localStorage.getItem(key);
-            if (mediaId && val && VALID_SYNC_STATUSES.has(val)) {
-              entriesToSync.push({ mediaId, status: val });
-              keysToRemove.push(key);
-            }
-          }
-        }
-
-        if (entriesToSync.length === 0) return;
-
-        const res = await fetch("/api/v1/library/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ entries: entriesToSync }),
-        });
-
-        if (res.ok) {
-          keysToRemove.forEach((k) => localStorage.removeItem(k));
-        }
-      } catch {
-        // Ignore background sync failures
+  useEffect(() => {
+    if (!authModal.isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAuthModal((prev) => ({ ...prev, isOpen: false }));
       }
     };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [authModal.isOpen]);
 
-    void syncLocalBookmarks();
+  const refreshLibraryMap = useCallback(async () => {
+    if (!user?.id) {
+      setLibraryMap({});
+      return;
+    }
+    try {
+      const res = await fetch("/api/v1/library", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const data = unwrapApiData<UserLibraryResponseDto>(json);
+      if (data?.entries) {
+        const nextMap: Record<string, QuickLibrarySummary> = {};
+        for (const entry of data.entries) {
+          nextMap[entry.mediaId] = {
+            status: entry.status,
+            isFavorite: Boolean(entry.isFavorite),
+            progress: entry.progress || 0,
+            score: entry.score,
+          };
+        }
+        setLibraryMap(nextMap);
+      }
+    } catch {
+      // Ignore background fetch error
+    }
   }, [user?.id]);
+
+  // Hydrate libraryMap when authenticated; purge any stale guest localStorage keys when logged out
+  useEffect(() => {
+    if (user?.id) {
+      void refreshLibraryMap();
+    } else {
+      setLibraryMap({});
+      try {
+        const keysToDelete: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (
+            k &&
+            (k.startsWith("animanga:list:") || k.startsWith("animanga:fav:"))
+          ) {
+            keysToDelete.push(k);
+          }
+        }
+        keysToDelete.forEach((k) => localStorage.removeItem(k));
+      } catch {
+        // Ignore storage error
+      }
+    }
+  }, [user?.id, refreshLibraryMap]);
+
+  const setLocalLibraryItem = useCallback(
+    (mediaId: string, summary: Partial<QuickLibrarySummary> | null) => {
+      setLibraryMap((prev) => {
+        const next = { ...prev };
+        if (summary === null) {
+          delete next[mediaId];
+          return next;
+        }
+        const current = next[mediaId] || {
+          status: null,
+          isFavorite: false,
+          progress: 0,
+          score: null,
+        };
+        const updated: QuickLibrarySummary = {
+          ...current,
+          ...summary,
+        };
+        if (
+          !updated.status &&
+          !updated.isFavorite &&
+          updated.progress === 0 &&
+          !updated.score
+        ) {
+          delete next[mediaId];
+        } else {
+          next[mediaId] = updated;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const requireAuth = useCallback(
+    (action: AuthGateAction, targetTitle?: string): boolean => {
+      if (user?.id) return true;
+      setAuthModal({
+        isOpen: true,
+        action,
+        targetTitle,
+      });
+      return false;
+    },
+    [user?.id],
+  );
 
   const refreshUser = useCallback(async () => {
     try {
@@ -145,6 +299,7 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
       console.error("Failed to execute secure logout:", error);
     } finally {
       setUser(null);
+      setLibraryMap({});
       setIsLoading(false);
       router.push("/login");
       router.refresh();
@@ -155,18 +310,118 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
     setUser(newUser);
   }, []);
 
+  const activeCopy = GATE_COPY[authModal.action];
+  const ModalIcon = activeCopy.icon;
+  const callbackQuery = pathname
+    ? `?callbackUrl=${encodeURIComponent(pathname)}`
+    : "";
+
   return (
     <AuthContext.Provider
       value={{
         user,
         isAuthenticated: !!user,
         isLoading,
+        libraryMap,
         logout,
         updateUser,
         refreshUser,
+        refreshLibraryMap,
+        setLocalLibraryItem,
+        requireAuth,
       }}
     >
       {children}
+
+      {/* Global Context-Aware Authentication Prompt Modal */}
+      {authModal.isOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="auth-gate-modal-title"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-cinema/75 backdrop-blur-md animate-in fade-in duration-150"
+          onClick={() => setAuthModal((prev) => ({ ...prev, isOpen: false }))}
+        >
+          <div
+            className="relative w-full max-w-md rounded-3xl bg-card border border-border p-6 sm:p-7 shadow-2xl text-center flex flex-col items-center gap-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label="Close modal"
+              onClick={() =>
+                setAuthModal((prev) => ({ ...prev, isOpen: false }))
+              }
+              className="absolute top-4 right-4 p-2 rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="size-14 rounded-2xl bg-secondary border border-border flex items-center justify-center shadow-xs">
+              <ModalIcon className={cn("w-7 h-7", activeCopy.iconColor)} />
+            </div>
+
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/15 text-primary text-[11px] font-black uppercase tracking-wider">
+              <Sparkles className="w-3 h-3" />
+              {activeCopy.badge}
+            </span>
+
+            <div className="space-y-1.5">
+              <h3
+                id="auth-gate-modal-title"
+                className="text-xl sm:text-2xl font-black tracking-tight text-foreground"
+              >
+                {activeCopy.heading}
+              </h3>
+              <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                You need a registered Animanga account to{" "}
+                <span className="font-bold text-foreground">
+                  {activeCopy.verb}
+                </span>
+                {authModal.targetTitle ? (
+                  <>
+                    {" "}
+                    for{" "}
+                    <span className="font-bold text-primary">
+                      &ldquo;{authModal.targetTitle}&rdquo;
+                    </span>
+                  </>
+                ) : null}
+                . Sign in or create a free account in seconds.
+              </p>
+            </div>
+
+            <div className="w-full flex flex-col sm:flex-row gap-2.5 pt-2">
+              <Link
+                href={`/login${callbackQuery}`}
+                onClick={() =>
+                  setAuthModal((prev) => ({ ...prev, isOpen: false }))
+                }
+                className={cn(
+                  buttonVariants({ variant: "default" }),
+                  "flex-1 h-11 rounded-xl font-bold text-xs sm:text-sm gap-2 shadow-md",
+                )}
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Sign In</span>
+              </Link>
+              <Link
+                href="/register"
+                onClick={() =>
+                  setAuthModal((prev) => ({ ...prev, isOpen: false }))
+                }
+                className={cn(
+                  buttonVariants({ variant: "outline" }),
+                  "flex-1 h-11 rounded-xl font-bold text-xs sm:text-sm gap-2 bg-secondary/60 hover:bg-accent border-border",
+                )}
+              >
+                <UserPlus className="w-4 h-4 text-primary" />
+                <span>Create Account</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 }

@@ -1115,8 +1115,8 @@ function RegisterFormContent() {
 
 export default function RegisterPage() {
   return (
-    <div className="flex h-[100dvh] w-full bg-background overflow-hidden selection:bg-primary selection:text-primary-foreground">
-      <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none bg-cinema">
+    <div className="relative flex h-[100dvh] w-full max-w-full bg-background overflow-hidden selection:bg-primary selection:text-primary-foreground">
+      <div className="absolute inset-0 lg:relative lg:w-1/2 h-full z-0 pointer-events-none bg-cinema overflow-hidden">
         <div className="absolute inset-0 bg-background/60 lg:bg-gradient-to-t lg:from-cinema lg:via-cinema/30 lg:to-transparent z-10 backdrop-blur-sm lg:backdrop-blur-none" />
         <img
           src="/assets/hero/makizenin.avif"

@@ -10,11 +10,13 @@ export default async function CustomerWorkspaceLayout({
   await requireSession();
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-background text-foreground py-6 md:py-10">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 items-start">
+    <div className="min-h-[calc(100vh-4rem)] w-full max-w-full overflow-x-clip bg-background text-foreground py-5 md:py-10">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col lg:flex-row gap-5 lg:gap-8 items-stretch lg:items-start w-full min-w-0">
           <CustomerWorkspaceNav />
-          <div className="flex-1 w-full min-w-0">{children}</div>
+          <div className="flex-1 w-full max-w-full min-w-0 overflow-x-clip">
+            {children}
+          </div>
         </div>
       </div>
     </div>

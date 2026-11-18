@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Info,
   Plus,
+  Check,
   Star,
   ChevronLeft,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   Tv,
   BookOpen,
 } from "lucide-react";
+import { useAuth } from "@/providers/auth-provider";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { BRAND_COLORS } from "@/config/theme.config";
 import { cn } from "@/lib/utils";
@@ -35,6 +37,8 @@ export function LiquidMediaPlayer({
   activeTab,
   onTabChange,
 }: LiquidMediaPlayerProps) {
+  const { isAuthenticated, libraryMap, setLocalLibraryItem, requireAuth } =
+    useAuth();
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
@@ -288,11 +292,42 @@ export function LiquidMediaPlayer({
                           <Info className="w-4 h-4 mr-2" /> Explore Title
                         </Link>
                         <Button
+                          type="button"
                           variant="ghost"
+                          onClick={async () => {
+                            if (!requireAuth("bookmark", title)) return;
+                            const isSaved = Boolean(
+                              libraryMap[activeItem.id]?.status,
+                            );
+                            const nextStatus = isSaved ? null : "PLANNING";
+                            setLocalLibraryItem(activeItem.id, {
+                              status: nextStatus,
+                            });
+                            try {
+                              await fetch(`/api/v1/library/${activeItem.id}`, {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                credentials: "include",
+                                body: JSON.stringify({ status: nextStatus }),
+                              });
+                            } catch {
+                              // Ignore network hiccup
+                            }
+                          }}
                           aria-label={`Add ${title} to watchlist`}
-                          className="bg-cinema-foreground/15 hover:bg-cinema-foreground/25 border border-cinema-foreground/20 text-cinema-foreground h-10 sm:h-11 md:h-12 w-10 sm:w-11 md:w-12 rounded-xl backdrop-blur-md transition-transform hover:scale-[1.03] p-0"
+                          className={cn(
+                            "h-10 sm:h-11 md:h-12 w-10 sm:w-11 md:h-12 rounded-xl backdrop-blur-md transition-transform hover:scale-[1.03] p-0 cursor-pointer border",
+                            isAuthenticated && libraryMap[activeItem.id]?.status
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-cinema-foreground/15 hover:bg-cinema-foreground/25 border-cinema-foreground/20 text-cinema-foreground",
+                          )}
                         >
-                          <Plus className="w-5 h-5" />
+                          {isAuthenticated &&
+                          libraryMap[activeItem.id]?.status ? (
+                            <Check className="w-5 h-5" />
+                          ) : (
+                            <Plus className="w-5 h-5" />
+                          )}
                         </Button>
                       </div>
                     </div>

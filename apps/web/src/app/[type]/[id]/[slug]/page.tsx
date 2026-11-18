@@ -11,6 +11,7 @@ import { StaffSection } from "@/features/media/staff-section";
 import { MediaInfoSidebar } from "@/features/media/media-info-sidebar";
 import { MediaRecommendations } from "@/features/media/media-recommendations";
 import { ExpandableSynopsis } from "@/components/shared/expandable-section";
+import { MediaEpisodesSection } from "@/features/media/media-episodes-section";
 
 interface MediaPageProps {
   params: Promise<{ type: string; id: string; slug: string }>;
@@ -116,7 +117,7 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
   };
 
   return (
-    <article className="min-h-screen bg-background text-foreground pb-16">
+    <article className="min-h-screen w-full max-w-full overflow-x-clip bg-background text-foreground pb-16">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(mediaJsonLd) }}
@@ -148,6 +149,9 @@ export default async function MediaDetailPage({ params }: MediaPageProps) {
               accentColor={accentColor}
             />
           </section>
+
+          {/* Interactive Episodes / Chapters Browser & Rating Section */}
+          <MediaEpisodesSection media={media} accentColor={accentColor} />
 
           {/* Characters & Voice Cast with Language Switcher & Expandable Grid */}
           {media.characters.items.length > 0 && (
