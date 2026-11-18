@@ -448,8 +448,7 @@ function RegisterFormContent() {
   };
 
   const signupWithGoogle = useGoogleLogin({
-    flow: "auth-code",
-    onSuccess: async (codeResponse) => {
+    onSuccess: async (tokenResponse) => {
       setIsGoogleLoading(true);
       setApiError(null);
 
@@ -459,8 +458,7 @@ function RegisterFormContent() {
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({
-            code: codeResponse.code,
-            redirectUri: "postmessage",
+            accessToken: tokenResponse.access_token,
           }),
         });
 
@@ -480,12 +478,13 @@ function RegisterFormContent() {
           updateUser({
             id: payload.id,
             email: payload.email,
+            username: payload.username,
             roles: payload.roles || [],
             permissions: payload.permissions || [],
           });
         }
 
-        router.push("/tickets");
+        router.push("/dashboard");
         router.refresh();
       } catch (err: unknown) {
         const message =
@@ -499,7 +498,6 @@ function RegisterFormContent() {
       setApiError("Google Sign-up was cancelled or failed.");
     },
   });
-
   // ---------------------------------------------------------------------------
   // DYNAMIC RENDER BLOCKS BASED ON STATE
   // ---------------------------------------------------------------------------

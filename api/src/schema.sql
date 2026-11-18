@@ -221,6 +221,18 @@ CREATE TYPE "content"."media_items_status_enum" AS ENUM (
 ALTER TYPE "content"."media_items_status_enum" OWNER TO "postgres";
 
 
+CREATE TYPE "content"."user_media_status_enum" AS ENUM (
+    'CURRENT',
+    'PLANNING',
+    'COMPLETED',
+    'PAUSED',
+    'DROPPED'
+);
+
+
+ALTER TYPE "content"."user_media_status_enum" OWNER TO "postgres";
+
+
 CREATE TYPE "events"."events_status_enum" AS ENUM (
     'DRAFT',
     'PUBLISHED',
@@ -735,6 +747,25 @@ CREATE TABLE IF NOT EXISTS "content"."media_trend_snapshots" (
 
 
 ALTER TABLE "content"."media_trend_snapshots" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "content"."user_media_entries" (
+    "id" "uuid" DEFAULT "public"."uuid_generate_v4"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "media_id" "uuid" NOT NULL,
+    "status" "content"."user_media_status_enum",
+    "is_favorite" boolean DEFAULT false NOT NULL,
+    "progress" integer DEFAULT 0 NOT NULL,
+    "score" numeric(3,1),
+    "notes" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_media_entries_progress_check" CHECK (("progress" >= 0)),
+    CONSTRAINT "user_media_entries_score_check" CHECK ((("score" IS NULL) OR (("score" >= (0)::numeric) AND ("score" <= (10)::numeric))))
+);
+
+
+ALTER TABLE "content"."user_media_entries" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "events"."events" (
@@ -1296,6 +1327,16 @@ ALTER TABLE ONLY "content"."media_trend_snapshots"
 
 
 
+ALTER TABLE ONLY "content"."user_media_entries"
+    ADD CONSTRAINT "uq_user_media_entry" UNIQUE ("user_id", "media_id");
+
+
+
+ALTER TABLE ONLY "content"."user_media_entries"
+    ADD CONSTRAINT "user_media_entries_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "events"."tickets"
     ADD CONSTRAINT "PK_343bc942ae261cf7a1377f48fd0" PRIMARY KEY ("id");
 
@@ -1553,6 +1594,14 @@ CREATE INDEX "idx_media_upcoming" ON "content"."media_items" USING "btree" ("med
 
 
 
+CREATE INDEX "idx_user_media_entries_user_fav" ON "content"."user_media_entries" USING "btree" ("user_id", "is_favorite") WHERE ("is_favorite" = true);
+
+
+
+CREATE INDEX "idx_user_media_entries_user_status" ON "content"."user_media_entries" USING "btree" ("user_id", "status", "updated_at" DESC);
+
+
+
 CREATE INDEX "idx_ticket_reservations_expiry" ON "events"."ticket_reservations" USING "btree" ("status", "expires_at") WHERE ("status" = 'RESERVED'::"events"."ticket_reservations_status_enum");
 
 
@@ -1676,6 +1725,16 @@ ALTER TABLE ONLY "content"."media_discovery_scores"
 
 ALTER TABLE ONLY "content"."media_editorial_overrides"
     ADD CONSTRAINT "FK_dbbce664d21b332a25a3ccd89ba" FOREIGN KEY ("media_id") REFERENCES "content"."media_items"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "content"."user_media_entries"
+    ADD CONSTRAINT "user_media_entries_media_id_fkey" FOREIGN KEY ("media_id") REFERENCES "content"."media_items"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "content"."user_media_entries"
+    ADD CONSTRAINT "user_media_entries_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "identity"."users"("id") ON DELETE CASCADE;
 
 
 

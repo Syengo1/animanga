@@ -79,27 +79,29 @@ interface VerificationContextPayload {
   exp: number;
 }
 
+interface VerifiedGoogleProfile {
+  sub: string;
+  email: string;
+  email_verified: boolean;
+  given_name?: string;
+  family_name?: string;
+}
+
 const DUMMY_ARGON2_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$YW5pbWFuZ2Ffc2FsdF8xNg$YW5pbWFuZ2FfZHVtbXlfaGFzaF8zMl9ieXRlc19rZXk';
 
 const RESEND_COOLDOWN_MS = 45 * 1000;
 const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
-const CONTEXT_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CONTEXT_TOKEN_TTL_MS = 30 * 60 * 1000;
 const OUTBOX_FAST_PATH_GRACE_MS = 15 * 1000;
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  private readonly googleClient = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-  );
-
-  // Per-boot fallback secret if AUTH_CONTEXT_SECRET is not set in .env
   private readonly contextSecret =
-    process.env.AUTH_CONTEXT_SECRET ||
-    process.env.GOOGLE_CLIENT_SECRET ||
+    this.cleanEnv(process.env.AUTH_CONTEXT_SECRET) ||
+    this.cleanEnv(process.env.GOOGLE_CLIENT_SECRET) ||
     'animanga-verification-context-secret-key';
 
   constructor(
@@ -110,6 +112,30 @@ export class AuthService {
     private readonly sessionService: SessionService,
     private readonly emailService: EmailService,
   ) {}
+
+  /**
+   * Strips accidental surrounding quotes or trailing whitespace/newlines
+   * from environment variables pasted into Render or Vercel dashboards.
+   */
+  private cleanEnv(raw?: string): string | undefined {
+    if (!raw) return undefined;
+    const trimmed = raw
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .trim();
+    return trimmed || undefined;
+  }
+
+  private get googleClientId(): string | undefined {
+    return (
+      this.cleanEnv(process.env.GOOGLE_CLIENT_ID) ||
+      this.cleanEnv(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID)
+    );
+  }
+
+  private get googleClientSecret(): string | undefined {
+    return this.cleanEnv(process.env.GOOGLE_CLIENT_SECRET);
+  }
 
   private formatError(error: unknown): string {
     if (error instanceof Error) {
@@ -137,10 +163,6 @@ export class AuthService {
     );
   }
 
-  /**
-   * Transparently retries a database operation once if the cloud pooler
-   * severed an idle socket right before the request arrived.
-   */
   private async withDbRetry<T>(operation: () => Promise<T>): Promise<T> {
     try {
       return await operation();
@@ -167,10 +189,6 @@ export class AuthService {
     );
   }
 
-  /**
-   * Issues a short-lived HMAC-SHA256 signed token proving the caller either
-   * just created this account or authenticated with its valid password.
-   */
   private createVerificationContextToken(
     userId: string,
     email: string,
@@ -563,8 +581,6 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Because password verification succeeded above, the caller has proven ownership
-    // of this account. Issue a signed verificationContextToken so they can view status.
     if (user.status === UserStatus.PENDING_EMAIL_VERIFICATION) {
       const verificationContextToken = this.createVerificationContextToken(
         user.id,
@@ -600,30 +616,186 @@ export class AuthService {
   }
 
   // ====================================================================
-  // F03.0 & F03.1: GOOGLE IDENTITY SERVICES
+  // F03.0 & F03.1: GOOGLE IDENTITY SERVICES (Dual-Mode Verification)
   // ====================================================================
 
-  private async verifyGoogleCode(code: string, redirectUri: string) {
+  /**
+   * Verifies a Google OAuth 2.0 `accessToken` directly against Google's
+   * authoritative `tokeninfo` and `userinfo` endpoints.
+   * Does not require GOOGLE_CLIENT_SECRET or redirect_uri matching.
+   */
+  private async verifyGoogleAccessToken(
+    accessToken: string,
+  ): Promise<VerifiedGoogleProfile> {
     try {
-      const { tokens } = await this.googleClient.getToken({
-        code,
+      const [tokenInfoRes, userInfoRes] = await Promise.all([
+        fetch(
+          `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
+          { signal: AbortSignal.timeout(10000) },
+        ),
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: AbortSignal.timeout(10000),
+        }),
+      ]);
+
+      if (!tokenInfoRes.ok || !userInfoRes.ok) {
+        throw new UnauthorizedException(
+          'Invalid or expired Google access token',
+        );
+      }
+
+      const tokenInfo = (await tokenInfoRes.json()) as {
+        aud?: string;
+        azp?: string;
+        sub?: string;
+      };
+      const userInfo = (await userInfoRes.json()) as {
+        sub?: string;
+        email?: string;
+        email_verified?: boolean;
+        given_name?: string;
+        family_name?: string;
+      };
+
+      const expectedClientId = this.googleClientId;
+      if (
+        expectedClientId &&
+        tokenInfo.aud !== expectedClientId &&
+        tokenInfo.azp !== expectedClientId
+      ) {
+        this.logger.error(
+          `Google token client_id mismatch: token aud=${tokenInfo.aud} vs server GOOGLE_CLIENT_ID=${expectedClientId}`,
+        );
+        throw new UnauthorizedException(
+          'Google Client ID mismatch between frontend and backend',
+        );
+      }
+
+      if (!userInfo.sub || !userInfo.email) {
+        throw new UnauthorizedException('Incomplete Google profile returned');
+      }
+
+      return {
+        sub: userInfo.sub,
+        email: userInfo.email,
+        email_verified: Boolean(userInfo.email_verified),
+        given_name: userInfo.given_name,
+        family_name: userInfo.family_name,
+      };
+    } catch (error: unknown) {
+      if (error instanceof UnauthorizedException) throw error;
+      this.logger.error(
+        'Google access_token verification failed',
+        this.formatError(error),
+      );
+      throw new UnauthorizedException(
+        'Unable to verify Google account credentials',
+      );
+    }
+  }
+
+  /**
+   * Verifies a Google identity from `accessToken`, `idToken`, or authorization `code`.
+   */
+  private async verifyGoogleIdentity(
+    input: GoogleAuthInput,
+  ): Promise<VerifiedGoogleProfile> {
+    // 1. Fast & secret-free path: OAuth2 access_token verification
+    if (input.accessToken) {
+      return this.verifyGoogleAccessToken(input.accessToken);
+    }
+
+    const clientId = this.googleClientId;
+    const clientSecret = this.googleClientSecret;
+    const redirectUri = input.redirectUri || 'postmessage';
+
+    // 2. Direct ID token verification if idToken was supplied
+    if (input.idToken) {
+      try {
+        const oauthClient = new OAuth2Client(clientId);
+        const ticket = await oauthClient.verifyIdToken({
+          idToken: input.idToken,
+          audience: clientId,
+        });
+        const payload = ticket.getPayload();
+        if (!payload?.sub || !payload?.email) {
+          throw new UnauthorizedException('Incomplete Google ID token payload');
+        }
+        return {
+          sub: payload.sub,
+          email: payload.email,
+          email_verified: Boolean(payload.email_verified),
+          given_name: payload.given_name,
+          family_name: payload.family_name,
+        };
+      } catch (error: unknown) {
+        this.logger.error(
+          'Google ID token verification failed',
+          this.formatError(error),
+        );
+        throw new UnauthorizedException('Invalid or expired Google ID token');
+      }
+    }
+
+    // 3. Authorization Code Exchange flow (requires GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET)
+    if (!input.code) {
+      throw new BadRequestException('Google authorization credential missing');
+    }
+
+    if (!clientId || !clientSecret) {
+      this.logger.error(
+        'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing in backend environment variables.',
+      );
+      throw new UnauthorizedException(
+        'Server Google OAuth credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) are not configured on the API server.',
+      );
+    }
+
+    try {
+      const oauthClient = new OAuth2Client(clientId, clientSecret, redirectUri);
+      const { tokens } = await oauthClient.getToken({
+        code: input.code,
         redirect_uri: redirectUri,
       });
 
-      if (!tokens.id_token) {
-        throw new Error('Missing id_token in Google response');
+      if (tokens.id_token) {
+        const ticket = await oauthClient.verifyIdToken({
+          idToken: tokens.id_token,
+          audience: clientId,
+        });
+        const payload = ticket.getPayload();
+        if (payload?.sub && payload?.email) {
+          return {
+            sub: payload.sub,
+            email: payload.email,
+            email_verified: Boolean(payload.email_verified),
+            given_name: payload.given_name,
+            family_name: payload.family_name,
+          };
+        }
       }
 
-      const ticket = await this.googleClient.verifyIdToken({
-        idToken: tokens.id_token,
-        audience: process.env.GOOGLE_CLIENT_ID,
-      });
-      return ticket.getPayload();
+      if (tokens.access_token) {
+        return await this.verifyGoogleAccessToken(tokens.access_token);
+      }
+
+      throw new Error('Missing id_token and access_token in Google response');
     } catch (error: unknown) {
-      this.logger.error(
-        'Google token exchange failed',
-        this.formatError(error),
-      );
+      const rawMsg = this.formatError(error);
+      this.logger.error('Google token exchange failed', rawMsg);
+
+      if (rawMsg.includes('invalid_client')) {
+        throw new UnauthorizedException(
+          'Google OAuth client mismatch (invalid_client): Ensure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render match NEXT_PUBLIC_GOOGLE_CLIENT_ID on Vercel.',
+        );
+      }
+      if (rawMsg.includes('redirect_uri_mismatch')) {
+        throw new UnauthorizedException(
+          'Google OAuth redirect_uri_mismatch: Ensure https://animangaweb.vercel.app is added to Authorized JavaScript origins and Authorized redirect URIs in Google Cloud Console.',
+        );
+      }
+
       throw new UnauthorizedException(
         'Invalid or expired Google authorization code',
       );
@@ -635,9 +807,9 @@ export class AuthService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<GoogleLoginResult> {
-    const payload = await this.verifyGoogleCode(input.code, input.redirectUri);
+    const payload = await this.verifyGoogleIdentity(input);
 
-    if (!payload?.sub || !payload?.email) {
+    if (!payload.sub || !payload.email) {
       throw new UnauthorizedException('Incomplete Google profile returned');
     }
 
@@ -652,7 +824,7 @@ export class AuthService {
     const givenName = payload.given_name;
     const familyName = payload.family_name;
 
-    // CASE 1: Returning Google User (with transient DB retry for idle pool sockets)
+    // CASE 1: Returning Google User
     const existingIdentity = await this.withDbRetry(() =>
       this.dataSource.manager.findOne(ExternalIdentity, {
         where: { provider: IdentityProvider.GOOGLE, providerSubject: sub },
@@ -690,18 +862,78 @@ export class AuthService {
       };
     }
 
-    // CASE 2: Existing User with the same verified email -> Auto-link or conflict
+    // CASE 2: Existing User with the same verified email -> Auto-link Google identity & sign in
     const existingUser = await this.withDbRetry(() =>
       this.userRepo.findOne({
         where: { email: normalizedEmail },
+        relations: {
+          roleAssignments: {
+            role: {
+              permissions: true,
+            },
+          },
+        },
       }),
     );
+
     if (existingUser) {
-      throw new ConflictException({
-        code: 'ACCOUNT_EXISTS',
-        message:
-          'An account with this email already exists. Please log in with your password and link your Google account in settings.',
-      });
+      if (
+        existingUser.status === UserStatus.SUSPENDED ||
+        existingUser.status === UserStatus.DISABLED
+      ) {
+        throw new UnauthorizedException(
+          'This account is suspended or disabled.',
+        );
+      }
+
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        if (existingUser.status === UserStatus.PENDING_EMAIL_VERIFICATION) {
+          existingUser.status = UserStatus.ACTIVE;
+          existingUser.emailVerifiedAt = new Date();
+          await queryRunner.manager.save(User, existingUser);
+        }
+
+        const linkedIdentity = queryRunner.manager.create(ExternalIdentity, {
+          user: { id: existingUser.id },
+          provider: IdentityProvider.GOOGLE,
+          providerSubject: sub,
+          providerEmail: normalizedEmail,
+        });
+        await queryRunner.manager.save(ExternalIdentity, linkedIdentity);
+        await queryRunner.commitTransaction();
+      } catch (error: unknown) {
+        await queryRunner.rollbackTransaction();
+        if (!this.isPgUniqueViolation(error)) {
+          this.logger.error(
+            'Failed to auto-link Google identity to existing user',
+            this.formatError(error),
+          );
+          throw new InternalServerErrorException(
+            'Failed to link Google sign-in to existing account',
+          );
+        }
+      } finally {
+        await queryRunner.release();
+      }
+
+      const { rawToken } = await this.sessionService.createSession(
+        existingUser,
+        ipAddress,
+        userAgent,
+      );
+      const { roles, permissions } =
+        this.extractRolesAndPermissions(existingUser);
+
+      return {
+        sessionToken: rawToken,
+        user: existingUser,
+        roles,
+        permissions,
+      };
     }
 
     // CASE 3: Brand New Google User
@@ -809,9 +1041,9 @@ export class AuthService {
     userId: string,
     input: GoogleAuthInput,
   ): Promise<{ success: boolean; message: string }> {
-    const payload = await this.verifyGoogleCode(input.code, input.redirectUri);
+    const payload = await this.verifyGoogleIdentity(input);
 
-    if (!payload?.sub || !payload?.email || !payload.email_verified) {
+    if (!payload.sub || !payload.email || !payload.email_verified) {
       throw new UnauthorizedException(
         'A verified Google account is required for linking',
       );
@@ -884,11 +1116,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * SECURE STATUS CHECK (Zero Enumeration):
-   * Requires a cryptographically signed `contextToken` issued either during
-   * registration or after verifying the user's password during login.
-   */
   async getVerificationStatusByToken(
     contextToken: string,
   ): Promise<RegistrationStatusResult> {
@@ -927,11 +1154,6 @@ export class AuthService {
     };
   }
 
-  /**
-   * ZERO-ENUMERATION RESEND:
-   * Always returns an identical 200 OK response regardless of whether the email
-   * exists, is already verified, or is pending verification.
-   */
   async resendVerificationEmail(
     rawEmail: string,
   ): Promise<ResendVerificationResult> {
@@ -950,7 +1172,6 @@ export class AuthService {
       this.userRepo.findOne({ where: { email } }),
     );
 
-    // If user doesn't exist or is already active/suspended, add small jitter and return uniform message
     if (!user || user.status !== UserStatus.PENDING_EMAIL_VERIFICATION) {
       await new Promise((resolve) =>
         setTimeout(resolve, crypto.randomInt(120, 260)),
@@ -966,7 +1187,6 @@ export class AuthService {
       },
     );
 
-    // Silently enforce cooldown without revealing account existence
     if (
       mostRecentToken &&
       Date.now() - mostRecentToken.createdAt.getTime() < RESEND_COOLDOWN_MS

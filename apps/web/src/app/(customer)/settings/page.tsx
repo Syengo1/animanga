@@ -148,8 +148,7 @@ export default function AccountSettingsPage() {
   };
 
   const linkGoogle = useGoogleLogin({
-    flow: "auth-code",
-    onSuccess: async (codeResponse) => {
+    onSuccess: async (tokenResponse) => {
       setIsLinkingGoogle(true);
       setSecurityMessage(null);
       setSecurityError(null);
@@ -160,8 +159,7 @@ export default function AccountSettingsPage() {
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({
-            code: codeResponse.code,
-            redirectUri: "postmessage",
+            accessToken: tokenResponse.access_token,
           }),
         });
         const json = await res.json();

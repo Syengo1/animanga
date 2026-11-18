@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\api\src\modules\identity\schemas\auth.schema.ts
 import { z } from 'zod';
 
 // STRICT: Only explicitly declared fields are permitted. Prevents mass-assignment.
@@ -5,8 +6,6 @@ export const RegisterSchema = z
   .object({
     email: z.string().email('Invalid email format').max(320).toLowerCase(),
 
-    // NEW: Unique username for public profiles and mentions.
-    // Optional so the backend can auto-generate a fallback if omitted.
     username: z
       .string()
       .min(3, 'Username must be at least 3 characters')
@@ -17,7 +16,6 @@ export const RegisterSchema = z
       )
       .optional(),
 
-    // NIST guidelines: Enforce length over complexity to prevent dictionary attacks
     password: z
       .string()
       .min(12, 'Password must be at least 12 characters')
@@ -39,17 +37,22 @@ export const LoginSchema = z
 
 export type LoginInput = z.infer<typeof LoginSchema>;
 
-// NEW: Google Auth Schema for OAuth code exchange
+// Dual-Mode Google Auth Schema: Supports OAuth2 accessToken, idToken, or Auth-Code exchange
 export const GoogleAuthSchema = z
   .object({
-    code: z.string().min(1, 'Authorization code is required'),
-    // Accept either a valid URL (for standard redirects) OR the literal "postmessage" (for popup flows)
+    code: z.string().min(1).optional(),
     redirectUri: z
       .string()
       .refine((val) => val === 'postmessage' || val.startsWith('http'), {
         message: 'Must be a valid URL or "postmessage"',
-      }),
+      })
+      .optional(),
+    accessToken: z.string().min(1).optional(),
+    idToken: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((data) => Boolean(data.accessToken || data.idToken || data.code), {
+    message: 'Either accessToken, idToken, or authorization code is required',
+  });
 
 export type GoogleAuthInput = z.infer<typeof GoogleAuthSchema>;

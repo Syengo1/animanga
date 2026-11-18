@@ -173,8 +173,7 @@ function LoginForm() {
   };
 
   const loginWithGoogle = useGoogleLogin({
-    flow: "auth-code",
-    onSuccess: async (codeResponse) => {
+    onSuccess: async (tokenResponse) => {
       setIsGoogleLoading(true);
       setApiError(null);
       setIsUnverified(false);
@@ -185,8 +184,7 @@ function LoginForm() {
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({
-            code: codeResponse.code,
-            redirectUri: "postmessage",
+            accessToken: tokenResponse.access_token,
           }),
         });
 
@@ -212,6 +210,7 @@ function LoginForm() {
           updateUser({
             id: payload.id,
             email: payload.email,
+            username: payload.username,
             roles: payload.roles || [],
             permissions: payload.permissions || [],
           });
