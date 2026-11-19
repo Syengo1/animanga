@@ -3,7 +3,7 @@
   "paths": {
     "/api/v1/system/health": {
       "get": {
-        "operationId": "SystemController_checkHealth",
+        "operationId": "SystemController_getHealth",
         "parameters": [],
         "responses": {
           "200": {

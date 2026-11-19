@@ -1,16 +1,13 @@
-import { Controller, Get } from '@nestjs/common';
+// C:\Projects\animanga-platform\api\src\modules\system\system.controller.ts
+import { Controller, Get, Header } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 
+@SkipThrottle()
 @Controller('system')
 export class SystemController {
   @Get('health')
-  checkHealth() {
-    return {
-      success: true,
-      data: {
-        status: 'ok',
-        version: process.env.npm_package_version || '1.0.0',
-        environment: process.env.NODE_ENV || 'development',
-      },
-    };
+  @Header('Cache-Control', 'no-store, max-age=0')
+  getHealth() {
+    return { ok: true };
   }
 }
