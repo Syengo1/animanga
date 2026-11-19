@@ -6,7 +6,9 @@ import {
   InternalServerErrorException,
   Logger,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, DataSource } from 'typeorm';
 import * as argon2 from 'argon2';
@@ -35,6 +37,7 @@ export interface RegisterResult {
   username: string;
   email: string;
   verificationContextToken: string;
+  emailDispatched: boolean;
   message: string;
 }
 
@@ -87,22 +90,18 @@ interface VerifiedGoogleProfile {
   family_name?: string;
 }
 
+// Valid PHC-formatted Argon2id hash (16-byte salt, 32-byte digest, m=19456, t=2, p=1)
 const DUMMY_ARGON2_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$YW5pbWFuZ2Ffc2FsdF8xNg$YW5pbWFuZ2FfZHVtbXlfaGFzaF8zMl9ieXRlc19rZXk';
 
 const RESEND_COOLDOWN_MS = 45 * 1000;
 const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const CONTEXT_TOKEN_TTL_MS = 30 * 60 * 1000;
-const OUTBOX_FAST_PATH_GRACE_MS = 15 * 1000;
+const OUTBOX_FAST_PATH_GRACE_MS = 30 * 1000; // Gives dual-port SMTP fast-path 30s before Outbox worker polls
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-
-  private readonly contextSecret =
-    this.cleanEnv(process.env.AUTH_CONTEXT_SECRET) ||
-    this.cleanEnv(process.env.GOOGLE_CLIENT_SECRET) ||
-    'animanga-verification-context-secret-key';
 
   constructor(
     @InjectRepository(User)
@@ -111,6 +110,8 @@ export class AuthService {
     private readonly dataSource: DataSource,
     private readonly sessionService: SessionService,
     private readonly emailService: EmailService,
+    @Optional()
+    private readonly configService?: ConfigService,
   ) {}
 
   /**
@@ -126,15 +127,38 @@ export class AuthService {
     return trimmed || undefined;
   }
 
+  private get contextSecret(): string {
+    return (
+      this.cleanEnv(
+        this.configService?.get<string>('AUTH_CONTEXT_SECRET') ??
+          process.env.AUTH_CONTEXT_SECRET,
+      ) ||
+      this.cleanEnv(
+        this.configService?.get<string>('GOOGLE_CLIENT_SECRET') ??
+          process.env.GOOGLE_CLIENT_SECRET,
+      ) ||
+      'animanga-verification-context-secret-key'
+    );
+  }
+
   private get googleClientId(): string | undefined {
     return (
-      this.cleanEnv(process.env.GOOGLE_CLIENT_ID) ||
-      this.cleanEnv(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID)
+      this.cleanEnv(
+        this.configService?.get<string>('GOOGLE_CLIENT_ID') ??
+          process.env.GOOGLE_CLIENT_ID,
+      ) ||
+      this.cleanEnv(
+        this.configService?.get<string>('NEXT_PUBLIC_GOOGLE_CLIENT_ID') ??
+          process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+      )
     );
   }
 
   private get googleClientSecret(): string | undefined {
-    return this.cleanEnv(process.env.GOOGLE_CLIENT_SECRET);
+    return this.cleanEnv(
+      this.configService?.get<string>('GOOGLE_CLIENT_SECRET') ??
+        process.env.GOOGLE_CLIENT_SECRET,
+    );
   }
 
   private formatError(error: unknown): string {
@@ -187,6 +211,53 @@ export class AuthService {
       'code' in error &&
       (error as { code?: unknown }).code === '23505'
     );
+  }
+
+  private async markOutboxPublished(dedupKey: string): Promise<void> {
+    try {
+      await this.dataSource.query(
+        `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
+        [OutboxStatus.PUBLISHED, dedupKey],
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to mark outbox message [${dedupKey}] as PUBLISHED: ${this.formatError(err)}`,
+      );
+    }
+  }
+
+  private async expediteOutboxRetry(
+    dedupKey: string,
+    reason: unknown,
+  ): Promise<void> {
+    const errorText =
+      reason instanceof Error ? reason.message : 'Fast-path SMTP failed';
+    try {
+      await this.dataSource.query(
+        `UPDATE integration.outbox_messages SET next_attempt_at = NOW(), last_error = $1 WHERE deduplication_key = $2 AND status = $3`,
+        [errorText, dedupKey, OutboxStatus.PENDING],
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Failed to expedite outbox retry for [${dedupKey}]: ${this.formatError(err)}`,
+      );
+    }
+  }
+
+  private dispatchWelcomeEmailAsync(
+    email: string,
+    username: string,
+    dedupKey: string,
+  ): void {
+    void this.emailService
+      .sendWelcomeEmail(email, username, dedupKey)
+      .then(() => this.markOutboxPublished(dedupKey))
+      .catch((err: unknown) => {
+        this.logger.warn(
+          `Welcome email deferred to Outbox worker: ${this.formatError(err)}`,
+        );
+        return this.expediteOutboxRetry(dedupKey, err);
+      });
   }
 
   private createVerificationContextToken(
@@ -343,6 +414,7 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     let savedUser: User;
+    let dedupKey: string;
 
     try {
       const user = queryRunner.manager.create(User, {
@@ -370,7 +442,7 @@ export class AuthService {
       );
       await queryRunner.manager.save(verificationToken);
 
-      const dedupKey = `verify:email:${savedUser.id}`;
+      dedupKey = `verify:email:${savedUser.id}`;
       const outboxMsg = queryRunner.manager.create(OutboxMessage, {
         aggregateType: 'USER',
         aggregateId: savedUser.id,
@@ -387,22 +459,10 @@ export class AuthService {
       await queryRunner.manager.save(outboxMsg);
 
       await queryRunner.commitTransaction();
-
-      this.emailService
-        .sendVerificationEmail(savedUser.email, rawToken, dedupKey)
-        .then(() =>
-          this.dataSource.query(
-            `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
-            [OutboxStatus.PUBLISHED, dedupKey],
-          ),
-        )
-        .catch((err: unknown) => {
-          this.logger.warn(
-            `Immediate email send deferred to Outbox worker: ${this.formatError(err)}`,
-          );
-        });
     } catch (error: unknown) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
 
       if (this.isPgUniqueViolation(error)) {
         throw new ConflictException(
@@ -419,6 +479,23 @@ export class AuthService {
       await queryRunner.release();
     }
 
+    // Await immediate SMTP delivery after transaction commit; fall back to Outbox on failure
+    let emailDispatched = false;
+    try {
+      await this.emailService.sendVerificationEmail(
+        savedUser.email,
+        rawToken,
+        dedupKey,
+      );
+      await this.markOutboxPublished(dedupKey);
+      emailDispatched = true;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Immediate verification email deferred to Outbox worker: ${this.formatError(err)}`,
+      );
+      await this.expediteOutboxRetry(dedupKey, err);
+    }
+
     const verificationContextToken = this.createVerificationContextToken(
       savedUser.id,
       savedUser.email,
@@ -429,8 +506,10 @@ export class AuthService {
       username: savedUser.username,
       email: savedUser.email,
       verificationContextToken,
-      message:
-        'Registration initiated. Please check your email to verify your account.',
+      emailDispatched,
+      message: emailDispatched
+        ? 'Registration initiated. Check your inbox (and Spam/Promotions) for your activation link.'
+        : 'Account created! Your verification email is queued for delivery—check your inbox in a moment or click Resend.',
     };
   }
 
@@ -519,24 +598,10 @@ export class AuthService {
         .execute();
 
       await queryRunner.commitTransaction();
-
-      this.emailService
-        .sendWelcomeEmail(verifiedEmail, verifiedUsername, welcomeDedupKey)
-        .then(() =>
-          this.dataSource.query(
-            `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
-            [OutboxStatus.PUBLISHED, welcomeDedupKey],
-          ),
-        )
-        .catch((err: unknown) => {
-          this.logger.warn(
-            `Welcome email deferred to Outbox worker: ${this.formatError(err)}`,
-          );
-        });
-
-      return { success: true, message: 'Email successfully verified' };
     } catch (error: unknown) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       if (error instanceof BadRequestException) throw error;
 
       this.logger.error('Email verification failed', this.formatError(error));
@@ -544,6 +609,14 @@ export class AuthService {
     } finally {
       await queryRunner.release();
     }
+
+    this.dispatchWelcomeEmailAsync(
+      verifiedEmail,
+      verifiedUsername,
+      welcomeDedupKey,
+    );
+
+    return { success: true, message: 'Email successfully verified' };
   }
 
   async login(
@@ -619,11 +692,6 @@ export class AuthService {
   // F03.0 & F03.1: GOOGLE IDENTITY SERVICES (Dual-Mode Verification)
   // ====================================================================
 
-  /**
-   * Verifies a Google OAuth 2.0 `accessToken` directly against Google's
-   * authoritative `tokeninfo` and `userinfo` endpoints.
-   * Does not require GOOGLE_CLIENT_SECRET or redirect_uri matching.
-   */
   private async verifyGoogleAccessToken(
     accessToken: string,
   ): Promise<VerifiedGoogleProfile> {
@@ -631,11 +699,11 @@ export class AuthService {
       const [tokenInfoRes, userInfoRes] = await Promise.all([
         fetch(
           `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
-          { signal: AbortSignal.timeout(10000) },
+          { signal: AbortSignal.timeout(10_000) },
         ),
         fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
           headers: { Authorization: `Bearer ${accessToken}` },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(10_000),
         }),
       ]);
 
@@ -665,7 +733,7 @@ export class AuthService {
         tokenInfo.azp !== expectedClientId
       ) {
         this.logger.error(
-          `Google token client_id mismatch: token aud=${tokenInfo.aud} vs server GOOGLE_CLIENT_ID=${expectedClientId}`,
+          `Google token client_id mismatch: token aud=${tokenInfo.aud ?? 'none'} vs server GOOGLE_CLIENT_ID=${expectedClientId}`,
         );
         throw new UnauthorizedException(
           'Google Client ID mismatch between frontend and backend',
@@ -674,6 +742,10 @@ export class AuthService {
 
       if (!userInfo.sub || !userInfo.email) {
         throw new UnauthorizedException('Incomplete Google profile returned');
+      }
+
+      if (tokenInfo.sub && tokenInfo.sub !== userInfo.sub) {
+        throw new UnauthorizedException('Google identity subject mismatch');
       }
 
       return {
@@ -695,9 +767,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * Verifies a Google identity from `accessToken`, `idToken`, or authorization `code`.
-   */
   private async verifyGoogleIdentity(
     input: GoogleAuthInput,
   ): Promise<VerifiedGoogleProfile> {
@@ -730,6 +799,7 @@ export class AuthService {
           family_name: payload.family_name,
         };
       } catch (error: unknown) {
+        if (error instanceof UnauthorizedException) throw error;
         this.logger.error(
           'Google ID token verification failed',
           this.formatError(error),
@@ -782,6 +852,7 @@ export class AuthService {
 
       throw new Error('Missing id_token and access_token in Google response');
     } catch (error: unknown) {
+      if (error instanceof UnauthorizedException) throw error;
       const rawMsg = this.formatError(error);
       this.logger.error('Google token exchange failed', rawMsg);
 
@@ -906,7 +977,9 @@ export class AuthService {
         await queryRunner.manager.save(ExternalIdentity, linkedIdentity);
         await queryRunner.commitTransaction();
       } catch (error: unknown) {
-        await queryRunner.rollbackTransaction();
+        if (queryRunner.isTransactionActive) {
+          await queryRunner.rollbackTransaction();
+        }
         if (!this.isPgUniqueViolation(error)) {
           this.logger.error(
             'Failed to auto-link Google identity to existing user',
@@ -942,6 +1015,8 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     let savedUser: User;
+    let welcomeDedupKey = '';
+
     try {
       const rawPrefix = normalizedEmail
         .split('@')[0]
@@ -977,7 +1052,7 @@ export class AuthService {
       });
       await queryRunner.manager.save(externalIdentity);
 
-      const welcomeDedupKey = `welcome:email:${savedUser.id}`;
+      welcomeDedupKey = `welcome:email:${savedUser.id}`;
       const outboxMsg = queryRunner.manager.create(OutboxMessage, {
         aggregateType: 'USER',
         aggregateId: savedUser.id,
@@ -990,22 +1065,10 @@ export class AuthService {
       await queryRunner.manager.save(outboxMsg);
 
       await queryRunner.commitTransaction();
-
-      this.emailService
-        .sendWelcomeEmail(savedUser.email, savedUser.username, welcomeDedupKey)
-        .then(() =>
-          this.dataSource.query(
-            `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
-            [OutboxStatus.PUBLISHED, welcomeDedupKey],
-          ),
-        )
-        .catch((err: unknown) => {
-          this.logger.warn(
-            `Google welcome email deferred to Outbox worker: ${this.formatError(err)}`,
-          );
-        });
     } catch (error: unknown) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
 
       if (this.isPgUniqueViolation(error)) {
         throw new ConflictException(
@@ -1023,6 +1086,12 @@ export class AuthService {
     } finally {
       await queryRunner.release();
     }
+
+    this.dispatchWelcomeEmailAsync(
+      savedUser.email,
+      savedUser.username,
+      welcomeDedupKey,
+    );
 
     const { rawToken } = await this.sessionService.createSession(
       savedUser,
@@ -1099,7 +1168,9 @@ export class AuthService {
 
       return { success: true, message: 'Google account linked successfully' };
     } catch (error: unknown) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       if (error instanceof ConflictException) throw error;
       if (this.isPgUniqueViolation(error)) {
         throw new ConflictException(
@@ -1238,7 +1309,9 @@ export class AuthService {
 
       await queryRunner.commitTransaction();
     } catch (error: unknown) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       this.logger.error(
         'Failed to rotate verification token',
         this.formatError(error),
@@ -1248,19 +1321,19 @@ export class AuthService {
       await queryRunner.release();
     }
 
-    this.emailService
-      .sendVerificationEmail(user.email, rawToken, dedupKey)
-      .then(() =>
-        this.dataSource.query(
-          `UPDATE integration.outbox_messages SET status = $1, published_at = NOW() WHERE deduplication_key = $2`,
-          [OutboxStatus.PUBLISHED, dedupKey],
-        ),
-      )
-      .catch((err: unknown) => {
-        this.logger.warn(
-          `Immediate resend email deferred to Outbox worker: ${this.formatError(err)}`,
-        );
-      });
+    try {
+      await this.emailService.sendVerificationEmail(
+        user.email,
+        rawToken,
+        dedupKey,
+      );
+      await this.markOutboxPublished(dedupKey);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Immediate resend email deferred to Outbox worker: ${this.formatError(err)}`,
+      );
+      await this.expediteOutboxRetry(dedupKey, err);
+    }
 
     return uniformResponse;
   }

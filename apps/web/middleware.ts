@@ -34,13 +34,13 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // 2. Redirect authenticated users away from auth pages (unless verifying a token)
+  // 2. Redirect authenticated users away from auth pages to /dashboard (unless verifying a token)
   const hasVerifyToken = request.nextUrl.searchParams.has("token");
   if (
     (pathname === "/login" || (pathname === "/register" && !hasVerifyToken)) &&
     hasSession
   ) {
-    return NextResponse.redirect(new URL("/tickets", request.url));
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return NextResponse.next();

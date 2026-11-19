@@ -3,31 +3,121 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
+  OnModuleInit,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { lookup } from 'dns/promises';
 import * as nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 interface MailTransportInfo {
   messageId?: string;
 }
 
-@Injectable()
-export class EmailService {
-  private readonly logger = new Logger(EmailService.name);
-  private readonly transporter: nodemailer.Transporter<MailTransportInfo>;
-  private readonly recentIdempotencyKeys = new Map<string, number>();
-  private readonly IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+interface IdempotentMailPayload {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
 
-  constructor() {
-    this.transporter = nodemailer.createTransport({
-      service: 'gmail',
-      pool: true,
-      maxConnections: 3,
-      maxMessages: 100,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_APP_PASSWORD,
+const GMAIL_SMTP_HOST = 'smtp.gmail.com';
+
+@Injectable()
+export class EmailService implements OnModuleInit {
+  private readonly logger = new Logger(EmailService.name);
+  private readonly completedKeys = new Map<string, number>();
+  private readonly inFlightDispatches = new Map<
+    string,
+    Promise<{ messageId: string }>
+  >();
+  private readonly IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+
+  constructor(@Optional() private readonly configService?: ConfigService) {}
+
+  onModuleInit(): void {
+    const { user, pass } = this.getCredentials();
+    if (!user || !pass) {
+      this.logger.error(
+        'SMTP NOT CONFIGURED: EMAIL_USER or EMAIL_APP_PASSWORD is missing. Verification emails will fail until set in environment variables.',
+      );
+    } else {
+      this.logger.log(
+        `EmailService ready (Gmail SMTP IPv4 + 465/587 fallback) for sender: ${user}`,
+      );
+    }
+  }
+
+  private cleanEnv(raw?: string): string | undefined {
+    if (!raw) return undefined;
+    const cleaned = raw
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .trim();
+    return cleaned || undefined;
+  }
+
+  private getCredentials(): { user?: string; pass?: string } {
+    const user = this.cleanEnv(
+      this.configService?.get<string>('EMAIL_USER') ?? process.env.EMAIL_USER,
+    );
+    const rawPass = this.cleanEnv(
+      this.configService?.get<string>('EMAIL_APP_PASSWORD') ??
+        process.env.EMAIL_APP_PASSWORD,
+    );
+    // Google displays 16-char App Passwords with spaces ("abcd efgh ijkl mnop")
+    const pass = rawPass ? rawPass.replace(/\s+/g, '') : undefined;
+    return { user, pass };
+  }
+
+  private getFrontendBaseUrl(): string {
+    return (
+      this.cleanEnv(
+        this.configService?.get<string>('FRONTEND_URL') ??
+          process.env.FRONTEND_URL,
+      ) ||
+      this.cleanEnv(
+        this.configService?.get<string>('NEXT_PUBLIC_WEB_URL') ??
+          process.env.NEXT_PUBLIC_WEB_URL,
+      ) ||
+      'https://animangaweb.vercel.app'
+    ).replace(/\/$/, '');
+  }
+
+  /**
+   * Resolves Gmail's SMTP host over IPv4 explicitly to avoid Node 22 / Render
+   * IPv6 outbound SMTP timeouts while preserving TLS SNI validation.
+   */
+  private async resolveGmailIpv4Host(): Promise<string> {
+    try {
+      const record = await lookup(GMAIL_SMTP_HOST, { family: 4 });
+      return record.address || GMAIL_SMTP_HOST;
+    } catch {
+      return GMAIL_SMTP_HOST;
+    }
+  }
+
+  private createTransport(
+    host: string,
+    port: 465 | 587,
+    user: string,
+    pass: string,
+  ): nodemailer.Transporter<MailTransportInfo> {
+    const options: SMTPTransport.Options = {
+      host,
+      port,
+      secure: port === 465,
+      requireTLS: port === 587,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
+      tls: {
+        servername: GMAIL_SMTP_HOST,
       },
-    });
+      auth: { user, pass },
+    };
+    return nodemailer.createTransport(options);
   }
 
   private formatError(error: unknown): string {
@@ -53,44 +143,107 @@ export class EmailService {
       .replace(/'/g, '&#039;');
   }
 
-  private isDuplicateDispatch(idempotencyKey: string): boolean {
+  private pruneCompletedKeys(): void {
     const now = Date.now();
-    for (const [key, timestamp] of this.recentIdempotencyKeys.entries()) {
-      if (now - timestamp > this.IDEMPOTENCY_TTL_MS) {
-        this.recentIdempotencyKeys.delete(key);
+    for (const [key, ts] of this.completedKeys.entries()) {
+      if (now - ts > this.IDEMPOTENCY_TTL_MS) {
+        this.completedKeys.delete(key);
       }
     }
-    const existing = this.recentIdempotencyKeys.get(idempotencyKey);
-    if (existing && now - existing < this.IDEMPOTENCY_TTL_MS) {
-      return true;
-    }
-    this.recentIdempotencyKeys.set(idempotencyKey, now);
-    return false;
   }
 
-  async sendVerificationEmail(
-    email: string,
-    rawToken: string,
+  /**
+   * Race-safe idempotent SMTP sender:
+   * - Never marks a key complete until SMTP accepts the message.
+   * - Concurrent retries for the same key await the active in-flight promise
+   *   instead of silently dropping the delivery.
+   * - Falls back automatically from SMTPS (465) to STARTTLS (587).
+   */
+  private async sendIdempotentMail(
     idempotencyKey: string,
+    mailOptions: IdempotentMailPayload,
+    label: string,
   ): Promise<{ messageId: string }> {
-    if (this.isDuplicateDispatch(idempotencyKey)) {
+    this.pruneCompletedKeys();
+
+    if (this.completedKeys.has(idempotencyKey)) {
       this.logger.log(
-        `Skipped duplicate verification email for ${email} [key=${idempotencyKey}]`,
+        `Skipped already-delivered ${label} [key=${idempotencyKey}]`,
       );
       return { messageId: `deduplicated:${idempotencyKey}` };
     }
 
-    const baseUrl =
-      process.env.FRONTEND_URL ||
-      process.env.NEXT_PUBLIC_WEB_URL ||
-      'https://animangaweb.vercel.app';
-    const verifyLink = `${baseUrl.replace(/\/$/, '')}/register?token=${rawToken}`;
-    const senderEmail = process.env.EMAIL_USER ?? 'noreply@animanga.app';
+    const existingFlight = this.inFlightDispatches.get(idempotencyKey);
+    if (existingFlight !== undefined) {
+      return existingFlight;
+    }
 
+    const { user, pass } = this.getCredentials();
+    if (!user || !pass) {
+      this.logger.error(
+        `Cannot send ${label}: EMAIL_USER or EMAIL_APP_PASSWORD is missing.`,
+      );
+      throw new InternalServerErrorException(
+        'Email service credentials are not configured',
+      );
+    }
+
+    const dispatchPromise = (async (): Promise<{ messageId: string }> => {
+      const smtpHost = await this.resolveGmailIpv4Host();
+      const fullOptions: nodemailer.SendMailOptions = {
+        ...mailOptions,
+        from: `"Animanga Platform" <${user}>`,
+        replyTo: user,
+      };
+
+      const ports: Array<465 | 587> = [465, 587];
+      let lastError: unknown;
+
+      for (const port of ports) {
+        const transport = this.createTransport(smtpHost, port, user, pass);
+        try {
+          const info = await transport.sendMail(fullOptions);
+          const messageId = info.messageId ?? 'unknown';
+          this.completedKeys.set(idempotencyKey, Date.now());
+          this.logger.log(
+            `${label} delivered to ${mailOptions.to} via port ${port} [key=${idempotencyKey}, messageId=${messageId}]`,
+          );
+          return { messageId };
+        } catch (err: unknown) {
+          lastError = err;
+          this.logger.warn(
+            `${label} attempt on Gmail SMTP port ${port} failed: ${err instanceof Error ? err.message : 'Unknown SMTP error'}`,
+          );
+        } finally {
+          transport.close();
+        }
+      }
+
+      this.logger.error(
+        `Failed to send ${label} to ${mailOptions.to} on all SMTP ports [key=${idempotencyKey}]`,
+        this.formatError(lastError),
+      );
+      throw new InternalServerErrorException(`Failed to deliver ${label}`);
+    })();
+
+    this.inFlightDispatches.set(idempotencyKey, dispatchPromise);
     try {
-      const info = await this.transporter.sendMail({
-        from: `"Animanga Platform" <${senderEmail}>`,
-        replyTo: senderEmail,
+      return await dispatchPromise;
+    } finally {
+      this.inFlightDispatches.delete(idempotencyKey);
+    }
+  }
+
+  sendVerificationEmail(
+    email: string,
+    rawToken: string,
+    idempotencyKey: string,
+  ): Promise<{ messageId: string }> {
+    const verifyLink = `${this.getFrontendBaseUrl()}/register?token=${rawToken}`;
+
+    return this.sendIdempotentMail(
+      idempotencyKey,
+      {
         to: email,
         subject: 'Confirm your Animanga account registration',
         text: [
@@ -122,49 +275,22 @@ export class EmailService {
             </p>
           </div>
         `,
-      });
-
-      const messageId = info.messageId ?? 'unknown';
-      this.logger.log(
-        `Verification email delivered to ${email} [key=${idempotencyKey}, messageId=${messageId}]`,
-      );
-      return { messageId };
-    } catch (error: unknown) {
-      this.recentIdempotencyKeys.delete(idempotencyKey);
-      this.logger.error(
-        `Failed to send verification email to ${email} [key=${idempotencyKey}]`,
-        this.formatError(error),
-      );
-      throw new InternalServerErrorException(
-        'Failed to deliver verification email',
-      );
-    }
+      },
+      'verification email',
+    );
   }
 
-  async sendWelcomeEmail(
+  sendWelcomeEmail(
     email: string,
     username: string,
     idempotencyKey: string,
   ): Promise<{ messageId: string }> {
-    if (this.isDuplicateDispatch(idempotencyKey)) {
-      this.logger.log(
-        `Skipped duplicate welcome email for ${email} [key=${idempotencyKey}]`,
-      );
-      return { messageId: `deduplicated:${idempotencyKey}` };
-    }
-
-    const baseUrl =
-      process.env.FRONTEND_URL ||
-      process.env.NEXT_PUBLIC_WEB_URL ||
-      'https://animangaweb.vercel.app';
-    const loginLink = `${baseUrl.replace(/\/$/, '')}/login`;
-    const senderEmail = process.env.EMAIL_USER ?? 'noreply@animanga.app';
+    const loginLink = `${this.getFrontendBaseUrl()}/login`;
     const safeUsername = this.escapeHtml(username);
 
-    try {
-      const info = await this.transporter.sendMail({
-        from: `"Animanga Platform" <${senderEmail}>`,
-        replyTo: senderEmail,
+    return this.sendIdempotentMail(
+      idempotencyKey,
+      {
         to: email,
         subject: 'Your Animanga account is now active',
         text: [
@@ -180,27 +306,15 @@ export class EmailService {
               Your email has been verified, <strong style="color: #e6eef8;">${safeUsername}</strong>.
             </p>
             <p style="color: #94aac4; font-size: 15px; line-height: 1.6; margin-bottom: 28px;">
-              You now have full access to Animanga. Manage your digital tickets, track airing anime, and explore the manga catalog.
+              You now have full access to Animanga. Track airing anime, manage your library, and access your convention ticket wallet.
             </p>
             <a href="${loginLink}" style="display: inline-block; background-color: #38b28b; color: #0e1622; text-decoration: none; padding: 13px 26px; border-radius: 10px; font-weight: bold; font-size: 15px;">
-              Sign In to Animanga
+              Sign In to Dashboard
             </a>
           </div>
         `,
-      });
-
-      const messageId = info.messageId ?? 'unknown';
-      this.logger.log(
-        `Welcome email delivered to ${email} [key=${idempotencyKey}, messageId=${messageId}]`,
-      );
-      return { messageId };
-    } catch (error: unknown) {
-      this.recentIdempotencyKeys.delete(idempotencyKey);
-      this.logger.error(
-        `Failed to send welcome email to ${email} [key=${idempotencyKey}]`,
-        this.formatError(error),
-      );
-      throw new InternalServerErrorException('Failed to deliver welcome email');
-    }
+      },
+      'welcome email',
+    );
   }
 }
