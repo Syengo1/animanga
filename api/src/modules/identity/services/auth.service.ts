@@ -535,14 +535,12 @@ export class AuthService {
     let welcomeDedupKey = '';
 
     try {
-      const verificationRecord = await queryRunner.manager.findOne(
-        EmailVerificationToken,
-        {
-          where: { tokenHash },
-          relations: { user: true },
-          lock: { mode: 'pessimistic_write' },
-        },
-      );
+      const verificationRecord = await queryRunner.manager
+        .createQueryBuilder(EmailVerificationToken, 'evt')
+        .innerJoinAndSelect('evt.user', 'user')
+        .where('evt.tokenHash = :tokenHash', { tokenHash })
+        .setLock('pessimistic_write', undefined, ['evt'])
+        .getOne();
 
       if (!verificationRecord || !verificationRecord.user) {
         throw new BadRequestException({

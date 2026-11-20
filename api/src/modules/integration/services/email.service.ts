@@ -22,7 +22,14 @@ interface IdempotentMailPayload {
   html: string;
 }
 
+interface BrevoApiResponse {
+  messageId?: string;
+  message?: string;
+  code?: string;
+}
+
 const GMAIL_SMTP_HOST = 'smtp.gmail.com';
+const BREVO_SEND_URL = 'https://api.brevo.com/v3/smtp/email';
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -37,14 +44,18 @@ export class EmailService implements OnModuleInit {
   constructor(@Optional() private readonly configService?: ConfigService) {}
 
   onModuleInit(): void {
-    const { user, pass } = this.getCredentials();
-    if (!user || !pass) {
-      this.logger.error(
-        'SMTP NOT CONFIGURED: EMAIL_USER or EMAIL_APP_PASSWORD is missing. Verification emails will fail until set in environment variables.',
+    const { brevoApiKey, user, pass } = this.getConfig();
+    if (brevoApiKey && user) {
+      this.logger.log(
+        `EmailService ready (Brevo HTTPS Port 443) for sender: ${user}`,
+      );
+    } else if (user && pass) {
+      this.logger.log(
+        `EmailService ready (Gmail SMTP IPv4 fallback) for sender: ${user}. Set BREVO_API_KEY on Render to send over HTTPS port 443.`,
       );
     } else {
-      this.logger.log(
-        `EmailService ready (Gmail SMTP IPv4 + 465/587 fallback) for sender: ${user}`,
+      this.logger.error(
+        'EMAIL NOT CONFIGURED: Set BREVO_API_KEY + EMAIL_USER (recommended on Render) or EMAIL_USER + EMAIL_APP_PASSWORD.',
       );
     }
   }
@@ -58,7 +69,15 @@ export class EmailService implements OnModuleInit {
     return cleaned || undefined;
   }
 
-  private getCredentials(): { user?: string; pass?: string } {
+  private getConfig(): {
+    brevoApiKey?: string;
+    user?: string;
+    pass?: string;
+  } {
+    const brevoApiKey = this.cleanEnv(
+      this.configService?.get<string>('BREVO_API_KEY') ??
+        process.env.BREVO_API_KEY,
+    );
     const user = this.cleanEnv(
       this.configService?.get<string>('EMAIL_USER') ?? process.env.EMAIL_USER,
     );
@@ -66,9 +85,8 @@ export class EmailService implements OnModuleInit {
       this.configService?.get<string>('EMAIL_APP_PASSWORD') ??
         process.env.EMAIL_APP_PASSWORD,
     );
-    // Google displays 16-char App Passwords with spaces ("abcd efgh ijkl mnop")
     const pass = rawPass ? rawPass.replace(/\s+/g, '') : undefined;
-    return { user, pass };
+    return { brevoApiKey, user, pass };
   }
 
   private getFrontendBaseUrl(): string {
@@ -85,10 +103,6 @@ export class EmailService implements OnModuleInit {
     ).replace(/\/$/, '');
   }
 
-  /**
-   * Resolves Gmail's SMTP host over IPv4 explicitly to avoid Node 22 / Render
-   * IPv6 outbound SMTP timeouts while preserving TLS SNI validation.
-   */
   private async resolveGmailIpv4Host(): Promise<string> {
     try {
       const record = await lookup(GMAIL_SMTP_HOST, { family: 4 });
@@ -109,15 +123,48 @@ export class EmailService implements OnModuleInit {
       port,
       secure: port === 465,
       requireTLS: port === 587,
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
+      connectionTimeout: 8_000,
+      greetingTimeout: 8_000,
+      socketTimeout: 12_000,
       tls: {
         servername: GMAIL_SMTP_HOST,
       },
       auth: { user, pass },
     };
     return nodemailer.createTransport(options);
+  }
+
+  private async sendViaBrevo(
+    apiKey: string,
+    senderEmail: string,
+    mailOptions: IdempotentMailPayload,
+  ): Promise<string> {
+    const res = await fetch(BREVO_SEND_URL, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'api-key': apiKey,
+      },
+      signal: AbortSignal.timeout(10_000),
+      body: JSON.stringify({
+        sender: { name: 'Animanga Platform', email: senderEmail },
+        replyTo: { email: senderEmail },
+        to: [{ email: mailOptions.to }],
+        subject: mailOptions.subject,
+        textContent: mailOptions.text,
+        htmlContent: mailOptions.html,
+      }),
+    });
+
+    const body = (await res.json().catch(() => ({}))) as BrevoApiResponse;
+    if (!res.ok) {
+      throw new Error(
+        `Brevo HTTP ${res.status}: ${body.message || body.code || 'Request rejected'}`,
+      );
+    }
+
+    return body.messageId ?? 'brevo-accepted';
   }
 
   private formatError(error: unknown): string {
@@ -152,13 +199,6 @@ export class EmailService implements OnModuleInit {
     }
   }
 
-  /**
-   * Race-safe idempotent SMTP sender:
-   * - Never marks a key complete until SMTP accepts the message.
-   * - Concurrent retries for the same key await the active in-flight promise
-   *   instead of silently dropping the delivery.
-   * - Falls back automatically from SMTPS (465) to STARTTLS (587).
-   */
   private async sendIdempotentMail(
     idempotencyKey: string,
     mailOptions: IdempotentMailPayload,
@@ -178,10 +218,10 @@ export class EmailService implements OnModuleInit {
       return existingFlight;
     }
 
-    const { user, pass } = this.getCredentials();
-    if (!user || !pass) {
+    const { brevoApiKey, user, pass } = this.getConfig();
+    if (!user || (!brevoApiKey && !pass)) {
       this.logger.error(
-        `Cannot send ${label}: EMAIL_USER or EMAIL_APP_PASSWORD is missing.`,
+        `Cannot send ${label}: configure BREVO_API_KEY + EMAIL_USER (or EMAIL_USER + EMAIL_APP_PASSWORD).`,
       );
       throw new InternalServerErrorException(
         'Email service credentials are not configured',
@@ -189,6 +229,37 @@ export class EmailService implements OnModuleInit {
     }
 
     const dispatchPromise = (async (): Promise<{ messageId: string }> => {
+      // 1. Primary path: HTTPS Port 443 via Brevo API (never blocked on Render Free Tier)
+      if (brevoApiKey) {
+        try {
+          const messageId = await this.sendViaBrevo(
+            brevoApiKey,
+            user,
+            mailOptions,
+          );
+          this.completedKeys.set(idempotencyKey, Date.now());
+          this.logger.log(
+            `${label} delivered to ${mailOptions.to} via Brevo HTTPS [key=${idempotencyKey}, messageId=${messageId}]`,
+          );
+          return { messageId };
+        } catch (err: unknown) {
+          this.logger.error(
+            `Brevo HTTPS ${label} failed for ${mailOptions.to} [key=${idempotencyKey}]`,
+            this.formatError(err),
+          );
+          if (!pass) {
+            throw new InternalServerErrorException(
+              `Failed to deliver ${label}`,
+            );
+          }
+        }
+      }
+
+      // 2. Fallback path: Gmail SMTP (for local development or paid servers with open SMTP)
+      if (!pass) {
+        throw new InternalServerErrorException(`Failed to deliver ${label}`);
+      }
+
       const smtpHost = await this.resolveGmailIpv4Host();
       const fullOptions: nodemailer.SendMailOptions = {
         ...mailOptions,
@@ -206,7 +277,7 @@ export class EmailService implements OnModuleInit {
           const messageId = info.messageId ?? 'unknown';
           this.completedKeys.set(idempotencyKey, Date.now());
           this.logger.log(
-            `${label} delivered to ${mailOptions.to} via port ${port} [key=${idempotencyKey}, messageId=${messageId}]`,
+            `${label} delivered to ${mailOptions.to} via SMTP port ${port} [key=${idempotencyKey}, messageId=${messageId}]`,
           );
           return { messageId };
         } catch (err: unknown) {
@@ -220,7 +291,7 @@ export class EmailService implements OnModuleInit {
       }
 
       this.logger.error(
-        `Failed to send ${label} to ${mailOptions.to} on all SMTP ports [key=${idempotencyKey}]`,
+        `Failed to send ${label} to ${mailOptions.to} on all transports [key=${idempotencyKey}]`,
         this.formatError(lastError),
       );
       throw new InternalServerErrorException(`Failed to deliver ${label}`);
