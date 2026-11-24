@@ -20,7 +20,9 @@ import {
   ChevronDown,
   Heart,
   ShieldCheck,
+  CalendarClock,
 } from "lucide-react";
+import { useScheduleDrawer } from "@/features/schedule/schedule-context";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAuth } from "@/providers/auth-provider";
@@ -49,6 +51,8 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, user, logout } = useAuth();
+
+  const { isOpen: isScheduleOpen, toggleSchedule } = useScheduleDrawer();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -121,6 +125,21 @@ export function Navbar() {
                 </Link>
               );
             })}
+
+            <button
+              type="button"
+              onClick={toggleSchedule}
+              aria-expanded={isScheduleOpen}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer",
+                isScheduleOpen
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/70",
+              )}
+            >
+              <CalendarClock className="w-3.5 h-3.5 text-primary" />
+              <span>Schedule</span>
+            </button>
           </nav>
         </div>
 
@@ -261,6 +280,25 @@ export function Navbar() {
 
         {/* Mobile Top Bar Actions */}
         <div className="flex items-center gap-1.5 md:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setIsMobileMenuOpen(false);
+              toggleSchedule();
+            }}
+            aria-label="Open episode release schedule"
+            aria-expanded={isScheduleOpen}
+            className={cn(
+              "relative inline-flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-bold border transition-colors cursor-pointer",
+              isScheduleOpen
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-secondary/80 text-foreground border-border hover:bg-accent",
+            )}
+          >
+            <CalendarClock className="size-4 text-primary" />
+            <span>Schedule</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+          </button>
           <ThemeToggle />
           <button
             type="button"

@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { QueryProvider } from "@/providers/query-provider";
 import { AuthProvider } from "@/providers/auth-provider";
+import { ScheduleProvider } from "@/features/schedule/schedule-context";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { RouteAwareLayout } from "@/components/layout/route-aware-layout";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -142,7 +143,9 @@ export default async function RootLayout({
               disableTransitionOnChange
             >
               <AuthProvider initialUser={user}>
-                <RouteAwareLayout>{children}</RouteAwareLayout>
+                <ScheduleProvider>
+                  <RouteAwareLayout>{children}</RouteAwareLayout>
+                </ScheduleProvider>
               </AuthProvider>
             </ThemeProvider>
           </QueryProvider>

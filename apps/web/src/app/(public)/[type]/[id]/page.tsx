@@ -134,6 +134,7 @@ export default async function CategoryOrRedirectPage({
   }
 
   // 2. IS IT A MEDIA LOOKUP?
+  let targetId: string | null = null;
   let targetSlug: string | null = null;
 
   try {
@@ -141,25 +142,24 @@ export default async function CategoryOrRedirectPage({
       next: { revalidate: 3600 },
     });
 
-    // CRITICAL FIX: Unwrap the NestJS { success: true, data: { ... } } envelope!
     const media = response?.data || response;
 
     if (media && media.slug) {
+      targetId = media.id || id;
       targetSlug = media.slug;
     }
   } catch (error) {
     if (error instanceof ServerFetchError) {
-      if (error.status === 404) notFound(); // Genuine 404
+      if (error.status === 404) notFound();
       throw new Error(
         `Provider Data Synchronization Failed: HTTP ${error.status}`,
-      ); // 502/500 Provider failures
+      );
     }
     throw error;
   }
 
-  // Execute the redirect outside the try/catch block
-  if (targetSlug) {
-    redirect(`/${cleanType}/${id}/${targetSlug}`);
+  if (targetId && targetSlug) {
+    redirect(`/${cleanType}/${targetId}/${targetSlug}`);
   }
 
   notFound();
