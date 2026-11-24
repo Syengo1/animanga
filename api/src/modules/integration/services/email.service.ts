@@ -229,7 +229,7 @@ export class EmailService implements OnModuleInit {
     }
 
     const dispatchPromise = (async (): Promise<{ messageId: string }> => {
-      // 1. Primary path: HTTPS Port 443 via Brevo API (never blocked on Render Free Tier)
+      // 1. Primary path: HTTPS Port 443 via Brevo API
       if (brevoApiKey) {
         try {
           const messageId = await this.sendViaBrevo(
@@ -243,13 +243,17 @@ export class EmailService implements OnModuleInit {
           );
           return { messageId };
         } catch (err: unknown) {
+          const reason =
+            err instanceof Error ? err.message : 'Brevo HTTPS request failed';
           this.logger.error(
-            `Brevo HTTPS ${label} failed for ${mailOptions.to} [key=${idempotencyKey}]`,
+            `Brevo HTTPS ${label} failed for ${mailOptions.to} [key=${idempotencyKey}]: ${reason}`,
             this.formatError(err),
           );
-          if (!pass) {
+          // On production (Render blocks outbound SMTP), fail fast with the real Brevo reason
+          // so it is captured in integration.outbox_messages.last_error instead of timing out on SMTP.
+          if (process.env.NODE_ENV === 'production' || !pass) {
             throw new InternalServerErrorException(
-              `Failed to deliver ${label}`,
+              `Failed to deliver ${label}: ${reason}`,
             );
           }
         }

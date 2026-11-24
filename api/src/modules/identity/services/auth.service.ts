@@ -535,46 +535,75 @@ export class AuthService {
     let welcomeDedupKey = '';
 
     try {
-      const verificationRecord = await queryRunner.manager
-        .createQueryBuilder(EmailVerificationToken, 'evt')
-        .innerJoinAndSelect('evt.user', 'user')
-        .where('evt.tokenHash = :tokenHash', { tokenHash })
-        .setLock('pessimistic_write', undefined, ['evt'])
-        .getOne();
+      interface RawTokenRow {
+        id: string;
+        user_id: string;
+        expires_at: Date | string;
+        used_at: Date | string | null;
+      }
 
-      if (!verificationRecord || !verificationRecord.user) {
+      // 1. Lock ONLY the token row (zero joins -> immune to PostgreSQL outer-join FOR UPDATE errors)
+      const tokenRow = await queryRunner.manager
+        .createQueryBuilder(EmailVerificationToken, 'evt')
+        .select([
+          'evt.id AS id',
+          'evt.user_id AS user_id',
+          'evt.expires_at AS expires_at',
+          'evt.used_at AS used_at',
+        ])
+        .where('evt.token_hash = :tokenHash', { tokenHash })
+        .setLock('pessimistic_write')
+        .getRawOne<RawTokenRow>();
+
+      if (!tokenRow || !tokenRow.user_id) {
         throw new BadRequestException({
           code: 'VERIFICATION_TOKEN_INVALID',
           message: 'Invalid verification token',
         });
       }
 
-      if (verificationRecord.usedAt) {
+      if (tokenRow.used_at) {
         throw new BadRequestException({
           code: 'VERIFICATION_TOKEN_ALREADY_USED',
           message: 'This verification link has already been used',
         });
       }
 
-      if (verificationRecord.expiresAt < new Date()) {
+      if (new Date(tokenRow.expires_at) < new Date()) {
         throw new BadRequestException({
           code: 'VERIFICATION_TOKEN_EXPIRED',
           message: 'Verification token has expired',
         });
       }
 
-      await queryRunner.manager.query(
-        `UPDATE identity.email_verification_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
-        [verificationRecord.user.id],
-      );
+      // 2. Lock the user row directly with zero relations/joins (strictly typed as User | null)
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: tokenRow.user_id },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-      verificationRecord.user.status = UserStatus.ACTIVE;
-      verificationRecord.user.emailVerifiedAt = new Date();
-      await queryRunner.manager.save(verificationRecord.user);
+      if (!user) {
+        throw new BadRequestException({
+          code: 'VERIFICATION_TOKEN_INVALID',
+          message: 'Invalid verification token',
+        });
+      }
 
-      verifiedEmail = verificationRecord.user.email;
-      verifiedUsername = verificationRecord.user.username;
-      welcomeDedupKey = `welcome:email:${verificationRecord.user.id}`;
+      // 3. Consume all unused tokens for this user and activate the account
+      await queryRunner.manager
+        .createQueryBuilder()
+        .update(EmailVerificationToken)
+        .set({ usedAt: new Date() })
+        .where('user_id = :userId AND used_at IS NULL', { userId: user.id })
+        .execute();
+
+      user.status = UserStatus.ACTIVE;
+      user.emailVerifiedAt = new Date();
+      await queryRunner.manager.save(user);
+
+      verifiedEmail = user.email;
+      verifiedUsername = user.username;
+      welcomeDedupKey = `welcome:email:${user.id}`;
 
       await queryRunner.manager
         .createQueryBuilder()
@@ -582,7 +611,7 @@ export class AuthService {
         .into(OutboxMessage)
         .values({
           aggregateType: 'USER',
-          aggregateId: verificationRecord.user.id,
+          aggregateId: user.id,
           eventType: 'USER_ACTIVATED',
           payload: {
             email: verifiedEmail,
@@ -1256,11 +1285,14 @@ export class AuthService {
       },
     );
 
-    if (
-      mostRecentToken &&
-      Date.now() - mostRecentToken.createdAt.getTime() < RESEND_COOLDOWN_MS
-    ) {
-      return uniformResponse;
+    // Derive token issuance time from timestamptz `expiresAt` so non-UTC hosts never miscalculate cooldown
+    if (mostRecentToken) {
+      const issuedAtMs =
+        mostRecentToken.expiresAt.getTime() - VERIFICATION_TOKEN_TTL_MS;
+      const elapsedMs = Date.now() - issuedAtMs;
+      if (elapsedMs >= 0 && elapsedMs < RESEND_COOLDOWN_MS) {
+        return uniformResponse;
+      }
     }
 
     const rawToken = crypto.randomBytes(32).toString('hex');
