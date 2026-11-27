@@ -1,4 +1,6 @@
+// C:\Projects\animanga-platform\apps\web\src\components\SparklesCore.tsx
 "use client";
+
 import React, { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -13,6 +15,7 @@ type ParticlesProps = {
   particleSpeed?: number;
   particleColor?: string;
   particleDensity?: number;
+  paused?: boolean;
   children?: React.ReactNode;
 };
 
@@ -33,6 +36,7 @@ export const SparklesCore = (props: ParticlesProps) => {
     particleSpeed = 0.5,
     particleColor = "#ffffff",
     particleDensity = 0.5,
+    paused = false,
     children,
   } = props;
 
@@ -40,17 +44,18 @@ export const SparklesCore = (props: ParticlesProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (paused) return;
+
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    // CRITICAL FIX: Changed alpha to true.
-    // This allows the canvas to be transparent, letting the Next-Themes
-    // HTML background (white in light mode, black in dark mode) show through perfectly.
     const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId = 0;
+    let viewportWidth = 1;
+    let viewportHeight = 1;
 
     type Particle = {
       x: number;
@@ -92,39 +97,37 @@ export const SparklesCore = (props: ParticlesProps) => {
     };
 
     const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const width = container.clientWidth || container.offsetWidth || 1;
-      const height = container.clientHeight || container.offsetHeight || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      viewportWidth = container.clientWidth || container.offsetWidth || 1;
+      viewportHeight = container.clientHeight || container.offsetHeight || 1;
 
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+      canvas.width = Math.floor(viewportWidth * dpr);
+      canvas.height = Math.floor(viewportHeight * dpr);
+      canvas.style.width = `${viewportWidth}px`;
+      canvas.style.height = `${viewportHeight}px`;
 
-      ctx.scale(dpr, dpr);
-      initParticles(width, height);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      initParticles(viewportWidth, viewportHeight);
     };
 
     const render = () => {
-      const width = canvas.width / (window.devicePixelRatio || 1);
-      const height = canvas.height / (window.devicePixelRatio || 1);
-
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, viewportWidth, viewportHeight);
 
       if (background !== "transparent") {
         ctx.fillStyle = background;
-        ctx.fillRect(0, 0, width, height);
+        ctx.fillRect(0, 0, viewportWidth, viewportHeight);
       }
 
       ctx.fillStyle = `rgb(${rgbColor})`;
 
-      particles.forEach((p) => {
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        if (p.x < 0) p.x = width;
-        if (p.x > width) p.x = 0;
-        if (p.y < 0) p.y = height;
-        if (p.y > height) p.y = 0;
+        if (p.x < 0) p.x = viewportWidth;
+        if (p.x > viewportWidth) p.x = 0;
+        if (p.y < 0) p.y = viewportHeight;
+        if (p.y > viewportHeight) p.y = 0;
 
         p.opacity += p.opacityVel * flickerSpeed * 0.5;
         if (p.opacity <= 0.1 || p.opacity >= 1) {
@@ -136,13 +139,13 @@ export const SparklesCore = (props: ParticlesProps) => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
-      });
+      }
 
       ctx.globalAlpha = 1.0;
       animationFrameId = requestAnimationFrame(render);
     };
 
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", resize, { passive: true });
     resize();
     render();
 
@@ -151,6 +154,7 @@ export const SparklesCore = (props: ParticlesProps) => {
       cancelAnimationFrame(animationFrameId);
     };
   }, [
+    paused,
     background,
     minSize,
     maxSize,
@@ -172,7 +176,6 @@ export const SparklesCore = (props: ParticlesProps) => {
         ref={canvasRef}
         className="absolute inset-0 block pointer-events-none"
       />
-      {/* Children rendered safely above the background canvas */}
       <div className="relative z-10 w-full h-full flex flex-col items-center justify-center">
         {children}
       </div>

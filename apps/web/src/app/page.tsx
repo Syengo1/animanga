@@ -1,4 +1,5 @@
 // C:\Projects\animanga-platform\apps\web\src\app\page.tsx
+import { Suspense } from "react";
 import { serverFetch } from "@/lib/api/server-fetch";
 import { VoidHero } from "@/features/home/void-hero";
 import { HomeClientOrchestrator } from "@/features/home/home-client-orchestrator";
@@ -31,7 +32,26 @@ function extractDiscoveryData(obj: unknown): Record<string, any> | null {
   return record;
 }
 
-export default async function HomePage() {
+function HomeFeedsSkeleton() {
+  return (
+    <div className="container mx-auto px-4 py-10 space-y-8 animate-pulse">
+      <div className="w-full aspect-video md:aspect-[21/9] rounded-3xl bg-secondary/70 border border-border" />
+      <div className="space-y-3">
+        <div className="h-6 w-48 rounded-lg bg-secondary/70" />
+        <div className="flex gap-4 overflow-hidden">
+          {Array.from({ length: 6 }).map((_, idx) => (
+            <div
+              key={idx}
+              className="shrink-0 w-[145px] sm:w-[165px] md:w-[185px] aspect-[2/3] rounded-xl bg-secondary/60 border border-border"
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+async function HomeFeedsContent() {
   const [
     discoveryRes,
     trendMangaRes,
@@ -157,11 +177,17 @@ export default async function HomePage() {
     categories: mangaCategories,
   };
 
+  return <HomeClientOrchestrator animeData={animeData} mangaData={mangaData} />;
+}
+
+export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen">
       <VoidHero />
       <div id="trending-section" className="relative z-30 bg-background">
-        <HomeClientOrchestrator animeData={animeData} mangaData={mangaData} />
+        <Suspense fallback={<HomeFeedsSkeleton />}>
+          <HomeFeedsContent />
+        </Suspense>
       </div>
       <NewsletterCTA />
     </div>

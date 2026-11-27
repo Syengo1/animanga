@@ -1,4 +1,5 @@
 // C:\Projects\animanga-platform\apps\web\src\lib\auth\session.ts
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -21,27 +22,29 @@ export interface SessionUser {
   permissions: string[];
 }
 
-export async function getSessionToken(): Promise<{
-  name: string;
-  value: string;
-} | null> {
-  try {
-    const cookieStore = await cookies();
-    const prodCookie = cookieStore.get(PROD_AUTH_COOKIE_NAME);
-    if (prodCookie?.value) {
-      return { name: PROD_AUTH_COOKIE_NAME, value: prodCookie.value };
+export const getSessionToken = cache(
+  async (): Promise<{
+    name: string;
+    value: string;
+  } | null> => {
+    try {
+      const cookieStore = await cookies();
+      const prodCookie = cookieStore.get(PROD_AUTH_COOKIE_NAME);
+      if (prodCookie?.value) {
+        return { name: PROD_AUTH_COOKIE_NAME, value: prodCookie.value };
+      }
+      const devCookie = cookieStore.get(DEV_AUTH_COOKIE_NAME);
+      if (devCookie?.value) {
+        return { name: DEV_AUTH_COOKIE_NAME, value: devCookie.value };
+      }
+      return null;
+    } catch {
+      return null;
     }
-    const devCookie = cookieStore.get(DEV_AUTH_COOKIE_NAME);
-    if (devCookie?.value) {
-      return { name: DEV_AUTH_COOKIE_NAME, value: devCookie.value };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
+  },
+);
 
-export async function getCurrentUser(): Promise<SessionUser | null> {
+export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   const token = await getSessionToken();
   if (!token) return null;
 
@@ -56,6 +59,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
         Authorization: `Bearer ${token.value}`,
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
     });
 
     if (!res.ok) return null;
@@ -81,7 +85,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   } catch {
     return null;
   }
-}
+});
 
 export async function requireSession(): Promise<SessionUser> {
   const user = await getCurrentUser();

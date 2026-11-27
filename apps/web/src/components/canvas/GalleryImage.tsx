@@ -1,17 +1,12 @@
+// C:\Projects\animanga-platform\apps\web\src\components\canvas\GalleryImage.tsx
 import { useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
-import { useTexture } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import gsap from "gsap";
 
 import "./GalleryShaderMaterial";
-import { projectsData, CalculatedProjectData } from "@/lib/data";
-
-if (typeof window !== "undefined") {
-  projectsData.forEach((d) => {
-    useTexture.preload(d.image.url);
-  });
-}
+import { getCachedGalleryTexture } from "./galleryTextureStore";
+import type { CalculatedProjectData } from "@/lib/data";
 
 declare module "@react-three/fiber" {
   interface ThreeElements {
@@ -25,7 +20,7 @@ declare module "@react-three/fiber" {
       uSizeFactorY?: number;
       uTiltAngle?: number;
       uOpacity?: number;
-      uBgColor?: THREE.Color; // Add uniform to types
+      uBgColor?: THREE.Color;
     };
   }
 }
@@ -34,7 +29,7 @@ type GalleryMaterialType = THREE.ShaderMaterial & {
   uCurveAmountX: number;
   uTiltAngle: number;
   uOpacity: number;
-  uBgColor: THREE.Color; // Add uniform to types
+  uBgColor: THREE.Color;
 };
 
 interface GalleryImageProps {
@@ -59,15 +54,9 @@ export default function GalleryImage({
   const originalQuat = useRef<THREE.Quaternion>(new THREE.Quaternion());
   const hasHovered = useRef(false);
 
-  const { gl, size } = useThree();
-  const texture = useTexture(data.image.url) as THREE.Texture;
-
-  useLayoutEffect(() => {
-    if (!texture) return;
-    texture.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-  }, [texture, gl]);
+  const { size } = useThree();
+  const isMobile = size.width < 768;
+  const texture = getCachedGalleryTexture(data.image.url, isMobile);
 
   useLayoutEffect(() => {
     if (!meshRef.current) return;
@@ -112,26 +101,25 @@ export default function GalleryImage({
   }, [data.baseOpacity, triggerIntro]);
 
   useFrame((state) => {
-    if (!materialRef.current) return;
+    const mat = materialRef.current;
+    if (!mat) return;
 
-    // CRITICAL FIX: Synchronize the shader's background color with the dynamic scene fog.
-    // This ensures the cards fade smoothly into White in Light Mode and Black in Dark Mode.
     if (state.scene.fog) {
-      materialRef.current.uBgColor.copy((state.scene.fog as THREE.Fog).color);
+      mat.uBgColor
+        .copy((state.scene.fog as THREE.Fog).color)
+        .convertLinearToSRGB();
     }
 
-    const isMobile = size.width < 768;
     const targetCurveX = isMobile ? 0 : globalCurveX.current;
-    const targetTilt = 0;
-
-    const diffX = targetCurveX - materialRef.current.uCurveAmountX;
+    const diffX = targetCurveX - mat.uCurveAmountX;
     if (Math.abs(diffX) > 0.0001) {
-      materialRef.current.uCurveAmountX += diffX * 0.05;
+      mat.uCurveAmountX += diffX * 0.05;
     }
 
-    const diffTilt = targetTilt - materialRef.current.uTiltAngle;
+    const targetTilt = isMobile ? 0 : globalTiltAngle.current * 0;
+    const diffTilt = targetTilt - mat.uTiltAngle;
     if (Math.abs(diffTilt) > 0.0001) {
-      materialRef.current.uTiltAngle += diffTilt * 0.05;
+      mat.uTiltAngle += diffTilt * 0.05;
     }
   });
 
@@ -166,20 +154,28 @@ export default function GalleryImage({
   }, [hoveredId, data.baseOpacity, data.id, triggerIntro]);
 
   const planeArgs = useMemo(
-    () => [data.calcWidth, data.calcHeight, 20, 20] as const,
-    [data.calcWidth, data.calcHeight],
+    () =>
+      [
+        data.calcWidth,
+        data.calcHeight,
+        isMobile ? 4 : 20,
+        isMobile ? 4 : 20,
+      ] as const,
+    [data.calcWidth, data.calcHeight, isMobile],
   );
+
+  if (!texture) return null;
 
   return (
     <mesh
       ref={meshRef}
       onPointerEnter={(e) => {
-        if (window.matchMedia("(hover: none)").matches) return;
+        if (isMobile || window.matchMedia("(hover: none)").matches) return;
         e.stopPropagation();
         setHoveredId(data.id);
       }}
       onPointerLeave={(e) => {
-        if (window.matchMedia("(hover: none)").matches) return;
+        if (isMobile || window.matchMedia("(hover: none)").matches) return;
         e.stopPropagation();
         setHoveredId(null);
       }}
@@ -193,8 +189,6 @@ export default function GalleryImage({
         uSizeFactorX={data.calcWidth / 2000}
         uSizeFactorY={data.calcHeight / 2000}
         uOpacity={0}
-        // CRITICAL FIX: Make the planes solid. By disabling true WebGL transparency,
-        // depth-testing correctly clips overlapping cards and perfectly blocks Sparkles.
         transparent={false}
         side={THREE.DoubleSide}
       />

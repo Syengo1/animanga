@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useScheduleDrawer } from "./schedule-context";
 import {
+  getLocalDayKey,
   formatClockToSecond,
   formatGmtOffset,
   formatReleaseTime,
@@ -33,6 +34,11 @@ async function fetchScheduleFeed(): Promise<ScheduleApiResponse> {
   return (await res.json()) as ScheduleApiResponse;
 }
 
+function buildDayAnchorDate(dayKey: string): Date {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
 export function ScheduleDrawer() {
   const { isOpen, closeSchedule, toggleSchedule } = useScheduleDrawer();
   const queryClient = useQueryClient();
@@ -44,11 +50,12 @@ export function ScheduleDrawer() {
   // Tick every second while drawer is open (hydrated client-side to prevent SSR mismatch)
   useEffect(() => {
     if (!isOpen) return;
-    setNowMs(Date.now());
-    const interval = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => clearInterval(interval);
+    const immediate = window.setTimeout(() => setNowMs(Date.now()), 0);
+    const interval = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => {
+      window.clearTimeout(immediate);
+      window.clearInterval(interval);
+    };
   }, [isOpen]);
 
   // Close on Escape key & lock background scroll when open on smaller viewports
@@ -87,25 +94,46 @@ export function ScheduleDrawer() {
     });
   };
 
-  const currentNowDate = useMemo(
-    () => (nowMs !== null ? new Date(nowMs) : null),
-    [nowMs],
-  );
+  const scheduleItems = data?.items;
 
-  const dayGroups = useMemo(() => {
-    if (!data?.items?.length || !currentNowDate) return [];
-    return groupScheduleByLocalDay(data.items, currentNowDate);
-  }, [data?.items, currentNowDate]);
+  // Stabilize calendar day key so 7-day grouping & date labels only recompute at midnight (not every second)
+  const todayKey = nowMs !== null ? getLocalDayKey(new Date(nowMs)) : null;
+
+  const { dayGroups, gmtDisplay, fullDateSublabel } = useMemo(() => {
+    if (!todayKey) {
+      return {
+        dayGroups: [],
+        gmtDisplay: "LOCAL",
+        fullDateSublabel: "",
+      };
+    }
+
+    const anchorDate = buildDayAnchorDate(todayKey);
+    const groups = scheduleItems?.length
+      ? groupScheduleByLocalDay(scheduleItems, anchorDate)
+      : [];
+
+    return {
+      dayGroups: groups,
+      gmtDisplay: formatGmtOffset(anchorDate),
+      fullDateSublabel: anchorDate.toLocaleDateString("en-US", {
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }),
+    };
+  }, [scheduleItems, todayKey]);
 
   const filteredGroups = useMemo(() => {
-    const referenceMs = nowMs ?? Date.now();
+    if (nowMs === null) return [];
     return dayGroups
       .filter(
         (group) => selectedDayKey === "ALL" || group.dayKey === selectedDayKey,
       )
       .map((group) => {
         const filteredItems = group.items.filter((item) => {
-          const isReleased = item.airingAt * 1000 <= referenceMs;
+          const isReleased = item.airingAt * 1000 <= nowMs;
           if (releaseFilter === "UPCOMING") return !isReleased;
           if (releaseFilter === "RELEASED") return isReleased;
           return true;
@@ -131,18 +159,8 @@ export function ScheduleDrawer() {
     };
   }, [dayGroups, nowMs]);
 
-  const clockDisplay = currentNowDate
-    ? formatClockToSecond(currentNowDate)
-    : "--:--:--";
-  const gmtDisplay = currentNowDate ? formatGmtOffset(currentNowDate) : "LOCAL";
-  const fullDateSublabel = currentNowDate
-    ? currentNowDate.toLocaleDateString("en-US", {
-        weekday: "long",
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    : "";
+  const clockDisplay =
+    nowMs !== null ? formatClockToSecond(new Date(nowMs)) : "--:--:--";
 
   return (
     <>
@@ -199,9 +217,7 @@ export function ScheduleDrawer() {
         aria-label="Anime Episode Release Schedule"
         className={cn(
           "fixed z-[61] bg-card/98 backdrop-blur-2xl text-card-foreground border-border shadow-2xl flex flex-col transition-transform duration-300 ease-out",
-          // Mobile: bottom sheet (zero crowding, easy thumb reach)
           "inset-x-0 bottom-0 h-[84dvh] rounded-t-3xl border-t",
-          // Desktop/Tablet: left-anchored side drawer
           "md:inset-y-0 md:left-0 md:right-auto md:bottom-auto md:h-full md:w-[360px] lg:w-[380px] md:rounded-none md:border-t-0 md:border-r",
           isOpen
             ? "translate-y-0 md:translate-x-0"
@@ -364,7 +380,7 @@ export function ScheduleDrawer() {
           ) : (
             filteredGroups.map((group) => (
               <section key={group.dayKey} className="space-y-2">
-                {/* Date + Weekday Group Header (Matching Reference Hierarchy) */}
+                {/* Date + Weekday Group Header */}
                 <div className="sticky top-0 z-10 -mx-1 px-1 py-1.5 bg-card/95 backdrop-blur-md flex items-center justify-between border-b border-border/70">
                   <div className="flex items-baseline gap-2">
                     <span
@@ -398,7 +414,7 @@ export function ScheduleDrawer() {
                 {/* Compact Episode Rows with Color Coding */}
                 <ul className="space-y-1">
                   {group.items.map((item) => {
-                    const referenceMs = nowMs ?? Date.now();
+                    const referenceMs = nowMs ?? 0;
                     const airingMs = item.airingAt * 1000;
                     const isReleased = airingMs <= referenceMs;
                     const isAiringSoon =

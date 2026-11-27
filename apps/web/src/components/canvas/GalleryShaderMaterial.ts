@@ -14,7 +14,7 @@ export const GalleryShaderMaterial = shaderMaterial(
     uSizeFactorX: 0,
     uSizeFactorY: 0,
     uTiltAngle: 0,
-    uOpacity: 1,
+    uOpacity: 0,
     uBgColor: new THREE.Color(THEME_PALETTE.dark.fogColor),
   },
   `
@@ -46,7 +46,8 @@ export const GalleryShaderMaterial = shaderMaterial(
 
     void main() {
       vec4 texColor = texture2D(uTexture, vUv);
-      vec3 finalColor = mix(uBgColor, texColor.rgb, uOpacity);
+      float effectiveOpacity = clamp(uOpacity * texColor.a, 0.0, 1.0);
+      vec3 finalColor = mix(uBgColor, texColor.rgb, effectiveOpacity);
       gl_FragColor = vec4(finalColor, 1.0);
     }
   `,

@@ -18,19 +18,31 @@ export class ServerFetchError extends Error {
   }
 }
 
+export interface ServerFetchInit extends RequestInit {
+  /**
+   * Opt-in per-user auth forwarding.
+   * Keep `false` (default) for public catalog/discovery/detail endpoints so
+   * Next.js Data Cache (`next.revalidate`) actually caches responses across users.
+   */
+  auth?: boolean;
+  timeoutMs?: number;
+}
+
 export async function serverFetch<T = unknown>(
   endpoint: string,
-  init?: RequestInit,
+  init?: ServerFetchInit,
 ): Promise<T> {
+  const { auth = false, timeoutMs = 12_000, ...fetchInit } = init ?? {};
+
   const isAbsolute =
     endpoint.startsWith("http://") || endpoint.startsWith("https://");
   const url = isAbsolute
     ? new URL(endpoint).toString()
     : new URL(endpoint, API_BASE_URL).toString();
 
-  const headers = new Headers(init?.headers);
+  const headers = new Headers(fetchInit.headers);
 
-  if (!headers.has("Content-Type") && !(init?.body instanceof FormData)) {
+  if (!headers.has("Content-Type") && !(fetchInit.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   if (!headers.has("Accept")) {
@@ -38,15 +50,18 @@ export async function serverFetch<T = unknown>(
   }
   headers.set("x-request-source", "animanga-web-server");
 
-  const sessionCookie = await getSessionToken();
-  if (sessionCookie) {
-    headers.set("Cookie", `${sessionCookie.name}=${sessionCookie.value}`);
-    headers.set("Authorization", `Bearer ${sessionCookie.value}`);
+  if (auth) {
+    const sessionCookie = await getSessionToken();
+    if (sessionCookie) {
+      headers.set("Cookie", `${sessionCookie.name}=${sessionCookie.value}`);
+      headers.set("Authorization", `Bearer ${sessionCookie.value}`);
+    }
   }
 
   const response = await fetch(url, {
-    ...init,
+    ...fetchInit,
     headers,
+    signal: fetchInit.signal ?? AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {

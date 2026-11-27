@@ -77,6 +77,8 @@ interface AuthProviderProps {
   initialUser: AuthUser | null;
 }
 
+const EMPTY_LIBRARY_MAP: Record<string, QuickLibrarySummary> = {};
+
 const GATE_COPY: Record<
   AuthGateAction,
   {
@@ -117,35 +119,54 @@ const GATE_COPY: Record<
   },
 };
 
+function buildLibrarySummaryMap(
+  data: UserLibraryResponseDto,
+): Record<string, QuickLibrarySummary> {
+  const nextMap: Record<string, QuickLibrarySummary> = {};
+  for (const entry of data.entries) {
+    nextMap[entry.mediaId] = {
+      status: entry.status,
+      isFavorite: Boolean(entry.isFavorite),
+      progress: entry.progress || 0,
+      score: entry.score,
+    };
+  }
+  return nextMap;
+}
+
 export function AuthProvider({ children, initialUser }: AuthProviderProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [user, setUser] = useState<AuthUser | null>(initialUser);
+  const [prevInitialUser, setPrevInitialUser] = useState<AuthUser | null>(
+    initialUser,
+  );
+  if (prevInitialUser !== initialUser) {
+    setPrevInitialUser(initialUser);
+    setUser(initialUser);
+  }
+
   const [isLoading, setIsLoading] = useState(false);
-  const [libraryMap, setLibraryMap] = useState<
-    Record<string, QuickLibrarySummary>
-  >({});
+  const [libraryMap, setLibraryMap] =
+    useState<Record<string, QuickLibrarySummary>>(EMPTY_LIBRARY_MAP);
   const [authModal, setAuthModal] = useState<{
     isOpen: boolean;
     action: AuthGateAction;
     targetTitle?: string;
+    openedAtPath: string | null;
   }>({
     isOpen: false,
     action: "bookmark",
+    openedAtPath: null,
   });
 
-  const router = useRouter();
-  const pathname = usePathname();
+  // Automatically hides the modal when the user navigates to a new route without a setState effect
+  const isModalVisible =
+    authModal.isOpen && authModal.openedAtPath === pathname;
 
   useEffect(() => {
-    setUser(initialUser);
-  }, [initialUser]);
-
-  // Close auth modal automatically on route change or Escape key
-  useEffect(() => {
-    setAuthModal((prev) => (prev.isOpen ? { ...prev, isOpen: false } : prev));
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!authModal.isOpen) return;
+    if (!isModalVisible) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setAuthModal((prev) => ({ ...prev, isOpen: false }));
@@ -153,13 +174,10 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [authModal.isOpen]);
+  }, [isModalVisible]);
 
   const refreshLibraryMap = useCallback(async () => {
-    if (!user?.id) {
-      setLibraryMap({});
-      return;
-    }
+    if (!user?.id) return;
     try {
       const res = await fetch("/api/v1/library", {
         credentials: "include",
@@ -169,45 +187,53 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
       const json = await res.json();
       const data = unwrapApiData<UserLibraryResponseDto>(json);
       if (data?.entries) {
-        const nextMap: Record<string, QuickLibrarySummary> = {};
-        for (const entry of data.entries) {
-          nextMap[entry.mediaId] = {
-            status: entry.status,
-            isFavorite: Boolean(entry.isFavorite),
-            progress: entry.progress || 0,
-            score: entry.score,
-          };
-        }
-        setLibraryMap(nextMap);
+        setLibraryMap(buildLibrarySummaryMap(data));
       }
     } catch {
       // Ignore background fetch error
     }
   }, [user?.id]);
 
-  // Hydrate libraryMap when authenticated; purge any stale guest localStorage keys when logged out
+  // Hydrate libraryMap asynchronously when authenticated; purge stale guest localStorage when logged out
   useEffect(() => {
     if (user?.id) {
-      void refreshLibraryMap();
-    } else {
-      setLibraryMap({});
-      try {
-        const keysToDelete: string[] = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (
-            k &&
-            (k.startsWith("animanga:list:") || k.startsWith("animanga:fav:"))
-          ) {
-            keysToDelete.push(k);
+      const controller = new AbortController();
+      void fetch("/api/v1/library", {
+        credentials: "include",
+        cache: "no-store",
+        signal: controller.signal,
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json: unknown) => {
+          if (!json) return;
+          const data = unwrapApiData<UserLibraryResponseDto>(json);
+          if (data?.entries) {
+            setLibraryMap(buildLibrarySummaryMap(data));
           }
-        }
-        keysToDelete.forEach((k) => localStorage.removeItem(k));
-      } catch {
-        // Ignore storage error
-      }
+        })
+        .catch(() => {
+          // Ignore aborted or failed background fetches
+        });
+
+      return () => controller.abort();
     }
-  }, [user?.id, refreshLibraryMap]);
+
+    try {
+      const keysToDelete: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (
+          k &&
+          (k.startsWith("animanga:list:") || k.startsWith("animanga:fav:"))
+        ) {
+          keysToDelete.push(k);
+        }
+      }
+      keysToDelete.forEach((k) => localStorage.removeItem(k));
+    } catch {
+      // Ignore storage error
+    }
+  }, [user?.id]);
 
   const setLocalLibraryItem = useCallback(
     (mediaId: string, summary: Partial<QuickLibrarySummary> | null) => {
@@ -250,10 +276,11 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
         isOpen: true,
         action,
         targetTitle,
+        openedAtPath: pathname,
       });
       return false;
     },
-    [user?.id],
+    [user?.id, pathname],
   );
 
   const refreshUser = useCallback(async () => {
@@ -299,7 +326,7 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
       console.error("Failed to execute secure logout:", error);
     } finally {
       setUser(null);
-      setLibraryMap({});
+      setLibraryMap(EMPTY_LIBRARY_MAP);
       setIsLoading(false);
       router.push("/login");
       router.refresh();
@@ -322,7 +349,7 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
         user,
         isAuthenticated: !!user,
         isLoading,
-        libraryMap,
+        libraryMap: user?.id ? libraryMap : EMPTY_LIBRARY_MAP,
         logout,
         updateUser,
         refreshUser,
@@ -334,7 +361,7 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
       {children}
 
       {/* Global Context-Aware Authentication Prompt Modal */}
-      {authModal.isOpen && (
+      {isModalVisible && (
         <div
           role="dialog"
           aria-modal="true"

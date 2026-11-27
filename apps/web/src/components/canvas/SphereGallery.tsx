@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\apps\web\src\components\canvas\SphereGallery.tsx
 import { useRef, useEffect, useState, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
@@ -21,6 +22,8 @@ export default function SphereGallery({
   onIntroComplete,
 }: SphereGalleryProps) {
   const { get, size } = useThree();
+  const isMobile = size.width < 768;
+
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isDiveComplete, setIsDiveComplete] = useState(false);
 
@@ -35,18 +38,18 @@ export default function SphereGallery({
 
   const readySignaled = useRef(false);
   const frameCounter = useRef(0);
-  const introStarted = useRef(false); // One-shot guard
+  const introStarted = useRef(false);
 
+  const onReadyRef = useRef(onReady);
   const onIntroCompleteRef = useRef(onIntroComplete);
   useEffect(() => {
+    onReadyRef.current = onReady;
     onIntroCompleteRef.current = onIntroComplete;
-  }, [onIntroComplete]);
+  }, [onReady, onIntroComplete]);
 
-  // Layout Calculation Engine
+  // Layout Calculation Engine (Exact original desktop & mobile geometry)
   const { layoutData, topBoundary, bottomBoundary, galleryRadius } =
     useMemo(() => {
-      // 1. Consistent R3F Context usage (no window.innerWidth)
-      const isMobile = size.width < 768;
       let topBound = -Infinity;
       let bottomBound = Infinity;
 
@@ -59,97 +62,101 @@ export default function SphereGallery({
       const activeRadius = isMobile ? 3000 : 2500 * designScale;
       let maxAspect = 1;
 
-      projectsData.forEach((p) => {
+      for (let i = 0; i < projectsData.length; i++) {
+        const p = projectsData[i];
         const aspect = p.image.dimensions.height / p.image.dimensions.width;
         if (aspect > maxAspect) maxAspect = aspect;
-      });
+      }
 
-      const mappedData = projectsData.map(
-        (proj: ProjectData, index: number): CalculatedProjectData => {
-          let calcWidth: number, calcHeight: number;
-          let xPos: number, yPos: number, zPos: number;
+      const mappedData: CalculatedProjectData[] = [];
 
-          if (!isMobile) {
-            const t = 5760;
-            const r = 3100;
-            const populatedAngle = 270;
+      for (let index = 0; index < projectsData.length; index++) {
+        const proj: ProjectData = projectsData[index];
+        let calcWidth: number;
+        let calcHeight: number;
+        let xPos: number;
+        let yPos: number;
+        let zPos: number;
 
-            const minRadius = 2500;
-            const maxRadius = 5500;
-            const halfPopulateAngleRad = (populatedAngle / 2) * (Math.PI / 180);
-            const circumference = 2 * Math.PI * minRadius;
-            const usedCircumference = circumference * (populatedAngle / 360);
-            const cylinderHeight = usedCircumference / (t / r);
-            const scaleUpFactor = usedCircumference / t;
+        if (!isMobile) {
+          const t = 5760;
+          const r = 3100;
+          const populatedAngle = 270;
 
-            const zScale = 1 + proj.z_position * 1.2;
-            const baseCalcWidth = proj.width * scaleUpFactor * zScale;
-            const baseCalcHeight =
-              baseCalcWidth *
-              (proj.image.dimensions.height / proj.image.dimensions.width);
+          const minRadius = 2500;
+          const maxRadius = 5500;
+          const halfPopulateAngleRad = (populatedAngle / 2) * (Math.PI / 180);
+          const circumference = 2 * Math.PI * minRadius;
+          const usedCircumference = circumference * (populatedAngle / 360);
+          const cylinderHeight = usedCircumference / (t / r);
+          const scaleUpFactor = usedCircumference / t;
 
-            const horizontalOffset = baseCalcWidth / usedCircumference / 2;
-            const verticalOffset = baseCalcHeight / cylinderHeight / 2;
-            const horizontalPosition = proj.x_position / t + horizontalOffset;
-            const verticalPosition = proj.y_position / r + verticalOffset;
+          const zScale = 1 + proj.z_position * 1.2;
+          const baseCalcWidth = proj.width * scaleUpFactor * zScale;
+          const baseCalcHeight =
+            baseCalcWidth *
+            (proj.image.dimensions.height / proj.image.dimensions.width);
 
-            const radius =
-              minRadius + (maxRadius - minRadius) * proj.z_position;
-            const angle =
-              -Math.PI / 2 +
-              horizontalPosition * populatedAngle * (Math.PI / 180) -
-              halfPopulateAngleRad;
+          const horizontalOffset = baseCalcWidth / usedCircumference / 2;
+          const verticalOffset = baseCalcHeight / cylinderHeight / 2;
+          const horizontalPosition = proj.x_position / t + horizontalOffset;
+          const verticalPosition = proj.y_position / r + verticalOffset;
 
-            calcWidth = baseCalcWidth * designScale;
-            calcHeight = baseCalcHeight * designScale;
-            xPos = radius * Math.cos(angle) * designScale;
-            zPos = radius * Math.sin(angle) * designScale;
-            yPos = (0.5 - verticalPosition) * cylinderHeight * designScale;
-          } else {
-            const radius = activeRadius;
-            const baseWidth = 900;
-            const gap = 180;
+          const radius = minRadius + (maxRadius - minRadius) * proj.z_position;
+          const angle =
+            -Math.PI / 2 +
+            horizontalPosition * populatedAngle * (Math.PI / 180) -
+            halfPopulateAngleRad;
 
-            const aspectRatio =
-              proj.image.dimensions.height / proj.image.dimensions.width;
-            calcWidth = baseWidth;
-            calcHeight = baseWidth * aspectRatio;
+          calcWidth = baseCalcWidth * designScale;
+          calcHeight = baseCalcHeight * designScale;
+          xPos = radius * Math.cos(angle) * designScale;
+          zPos = radius * Math.sin(angle) * designScale;
+          yPos = (0.5 - verticalPosition) * cylinderHeight * designScale;
+        } else {
+          const radius = activeRadius;
+          const baseWidth = 900;
+          const gap = 180;
 
-            const minAngleStep = 2 * Math.asin((baseWidth / 2 + gap) / radius);
-            const columns = Math.floor((Math.PI * 2) / minAngleStep);
-            const rows = Math.ceil(projectsData.length / columns);
-            const angleStep = (Math.PI * 2) / columns;
+          const aspectRatio =
+            proj.image.dimensions.height / proj.image.dimensions.width;
+          calcWidth = baseWidth;
+          calcHeight = baseWidth * aspectRatio;
 
-            const col = index % columns;
-            const row = Math.floor(index / columns);
-            const angle = col * angleStep;
+          const minAngleStep = 2 * Math.asin((baseWidth / 2 + gap) / radius);
+          const columns = Math.max(1, Math.floor((Math.PI * 2) / minAngleStep));
+          const rows = Math.ceil(projectsData.length / columns);
+          const angleStep = (Math.PI * 2) / columns;
 
-            xPos = radius * Math.cos(angle);
-            zPos = radius * Math.sin(angle);
+          const col = index % columns;
+          const row = Math.floor(index / columns);
+          const angle = col * angleStep;
 
-            const verticalSpacing = baseWidth * maxAspect + gap;
-            const staggerOffset = col % 2 === 0 ? verticalSpacing / 2 : 0;
-            yPos = ((rows - 1) / 2 - row) * verticalSpacing - staggerOffset;
-          }
+          xPos = radius * Math.cos(angle);
+          zPos = radius * Math.sin(angle);
 
-          const imgTop = yPos + calcHeight / 2;
-          const imgBottom = yPos - calcHeight / 2;
+          const verticalSpacing = baseWidth * maxAspect + gap;
+          const staggerOffset = col % 2 === 0 ? verticalSpacing / 2 : 0;
+          yPos = ((rows - 1) / 2 - row) * verticalSpacing - staggerOffset;
+        }
 
-          if (imgTop > topBound) topBound = imgTop;
-          if (imgBottom < bottomBound) bottomBound = imgBottom;
+        const imgTop = yPos + calcHeight / 2;
+        const imgBottom = yPos - calcHeight / 2;
 
-          return {
-            ...proj,
-            id: proj.project.id, // 2. Cleaned up ID (Removed the index append to avoid mixed render/project IDs)
-            calcWidth,
-            calcHeight,
-            xPos,
-            yPos,
-            zPos,
-            baseOpacity: proj.opacity ?? 1,
-          };
-        },
-      );
+        if (imgTop > topBound) topBound = imgTop;
+        if (imgBottom < bottomBound) bottomBound = imgBottom;
+
+        mappedData.push({
+          ...proj,
+          id: proj.project.id,
+          calcWidth,
+          calcHeight,
+          xPos,
+          yPos,
+          zPos,
+          baseOpacity: proj.opacity ?? 1,
+        });
+      }
 
       return {
         layoutData: mappedData,
@@ -157,20 +164,20 @@ export default function SphereGallery({
         bottomBoundary: bottomBound,
         galleryRadius: activeRadius,
       };
-    }, [size.width, size.height]);
+    }, [size.width, size.height, isMobile]);
 
-  // 3. Cinematic Entrance GSAP (One-Shot Guarded)
+  // Cinematic Entrance GSAP (One-Shot Guarded — immune to viewport resize/rotation reverts)
   useEffect(() => {
     if (!triggerIntro || introStarted.current) return;
     introStarted.current = true;
 
-    const camera = get().camera as THREE.PerspectiveCamera;
-    const isMobile = size.width < 768; // Uses R3F context instead of window
+    const { camera: rawCamera, size: liveSize } = get();
+    const camera = rawCamera as THREE.PerspectiveCamera;
+    const mobileAtStart = liveSize.width < 768;
 
     const ctx = gsap.context(() => {
-      // Configuration extracted
-      const startFov = isMobile ? 74 : 42;
-      const startZ = isMobile ? 4000 : 7000;
+      const startFov = mobileAtStart ? 74 : 42;
+      const startZ = mobileAtStart ? 4000 : 7000;
 
       camera.fov = startFov;
       camera.updateProjectionMatrix();
@@ -182,21 +189,23 @@ export default function SphereGallery({
         ease: "power3.out",
         onComplete: () => {
           setIsDiveComplete(true);
-          if (onIntroCompleteRef.current) onIntroCompleteRef.current();
+          onIntroCompleteRef.current?.();
         },
       });
     });
 
     return () => ctx.revert();
-  }, [get, triggerIntro, size.width]);
+  }, [get, triggerIntro]);
 
-  // 4. Pointer Interaction Tracking
+  // Pointer Interaction Tracking (Desktop mouse only)
   useEffect(() => {
+    if (isMobile) return;
+
     let initialized = false;
     let lastTime = performance.now();
     let lastX = 0;
     let lastY = 0;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined; // Browser-safe timeout
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const handlePointerMove = (e: PointerEvent) => {
       if (e.pointerType !== "mouse") return;
@@ -227,34 +236,39 @@ export default function SphereGallery({
       lastTime = currentTime;
     };
 
-    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointermove", handlePointerMove, {
+      passive: true,
+    });
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, []);
+  }, [isMobile]);
 
   useFrame((_, delta) => {
-    // 5. 3-Frame WebGL Warm-up Heuristic
-    if (!readySignaled.current && onReady) {
+    // 3-Frame WebGL Warm-up Heuristic
+    if (!readySignaled.current && onReadyRef.current) {
       frameCounter.current += 1;
       if (frameCounter.current >= 3) {
         readySignaled.current = true;
-        onReady();
+        onReadyRef.current();
       }
     }
 
-    // 6. Smooth Pointer Velocity (LERP)
-    // Smooths the twitchy raw mouse values into a cinematic glide
+    if (isMobile) return;
+
+    const safeDelta = Math.min(delta, 0.1);
+    const lerpAlpha = Math.min(1, 10 * safeDelta);
+
     smoothVelX.current = THREE.MathUtils.lerp(
       smoothVelX.current,
       rawVelX.current,
-      10 * delta,
+      lerpAlpha,
     );
     smoothVelY.current = THREE.MathUtils.lerp(
       smoothVelY.current,
       rawVelY.current,
-      10 * delta,
+      lerpAlpha,
     );
 
     globalCurveX.current = THREE.MathUtils.clamp(
@@ -270,10 +284,7 @@ export default function SphereGallery({
     );
   });
 
-  // 7. Fix Hover Propagating Null
   useEffect(() => {
-    // We remove the `hoveredId` falsy check so that `null` successfully passes to the parent
-    // allowing it to know when a hover state is cleared.
     if (onSelectProject) {
       onSelectProject(hoveredId);
     }
@@ -289,7 +300,7 @@ export default function SphereGallery({
       />
       {layoutData.map((data: CalculatedProjectData, index: number) => (
         <GalleryImage
-          key={`${data.id}-${index}`} // Restore the safe render map key
+          key={`${data.id}-${index}`}
           data={data}
           globalCurveX={globalCurveX}
           globalTiltAngle={globalTiltAngle}

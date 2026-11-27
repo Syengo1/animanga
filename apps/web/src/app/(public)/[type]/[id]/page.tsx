@@ -88,6 +88,7 @@ export default async function CategoryOrRedirectPage({
       });
       const response = await serverFetch<any>(
         `/api/v1/media/catalog?${query.toString()}`,
+        { next: { revalidate: 120 } },
       );
       payload = response.data?.pagination
         ? response.data

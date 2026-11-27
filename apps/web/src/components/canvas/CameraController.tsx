@@ -1,3 +1,4 @@
+// C:\Projects\animanga-platform\apps\web\src\components\canvas\CameraController.tsx
 import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
@@ -13,7 +14,7 @@ export default function CameraController({
   bottomBoundary?: number;
   galleryRadius?: number;
 }) {
-  const { camera, size, gl } = useThree();
+  const { get, size } = useThree();
   const isMobile = size.width < 768;
 
   // Immortal Physics State
@@ -50,17 +51,13 @@ export default function CameraController({
 
   useEffect(() => {
     if (!introCompleted) return;
+    const camera = get().camera as THREE.PerspectiveCamera;
     viewport.current.w = size.width;
     viewport.current.h = size.height;
 
-    const fovRad = THREE.MathUtils.degToRad(
-      (camera as THREE.PerspectiveCamera).fov,
-    );
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
     const hFovDeg = THREE.MathUtils.radToDeg(
-      2 *
-        Math.atan(
-          Math.tan(fovRad / 2) * (camera as THREE.PerspectiveCamera).aspect,
-        ),
+      2 * Math.atan(Math.tan(fovRad / 2) * camera.aspect),
     );
     bounds.current.hLimit = THREE.MathUtils.degToRad(
       135 - hFovDeg / (isMobile ? 8 : 2),
@@ -82,7 +79,7 @@ export default function CameraController({
       targets.current.posY = camera.position.y;
     }
   }, [
-    camera,
+    get,
     introCompleted,
     size.width,
     size.height,
@@ -94,7 +91,9 @@ export default function CameraController({
 
   useEffect(() => {
     if (!introCompleted) return;
+    const { camera, gl } = get();
     const canvasEl = gl.domElement;
+    const prevTouchAction = canvasEl.style.touchAction;
 
     const handlePointerDown = (e: PointerEvent) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -110,7 +109,13 @@ export default function CameraController({
       boundaryState.current = "none";
       targets.current.rotY = camera.rotation.y;
       targets.current.posY = camera.position.y;
-      if (e.pointerType !== "mouse") canvasEl.setPointerCapture(e.pointerId);
+      if (e.pointerType !== "mouse") {
+        try {
+          canvasEl.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore pointer capture errors on synthetic events
+        }
+      }
     };
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -187,13 +192,15 @@ export default function CameraController({
       }
     };
 
-    const handlePointerUp = (e: PointerEvent) => {
+    const handlePointerUp = () => {
       if (!isDragging.current) return;
       isDragging.current = false;
       if (activePointerId.current !== null) {
         try {
           canvasEl.releasePointerCapture(activePointerId.current);
-        } catch {}
+        } catch {
+          // Ignore if capture was already released
+        }
         activePointerId.current = null;
       }
       isHoldingToContinue.current = false;
@@ -240,14 +247,17 @@ export default function CameraController({
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
     return () => {
+      canvasEl.style.touchAction = prevTouchAction;
       window.removeEventListener("pointermove", handlePointerMove);
       canvasEl.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
     };
-  }, [introCompleted, camera, gl.domElement, isMobile]);
+  }, [introCompleted, get, isMobile]);
 
   useFrame((_, delta) => {
+    const { camera, gl } = get();
+
     if (
       !isMobile ||
       isExitingGallery.current ||
@@ -277,6 +287,7 @@ export default function CameraController({
       }
       return;
     }
+
     const progress = Math.min(
       (performance.now() - holdStartTime.current) / 1500,
       1.0,
@@ -289,16 +300,19 @@ export default function CameraController({
       if (activePointerId.current !== null) {
         try {
           gl.domElement.releasePointerCapture(activePointerId.current);
-        } catch {}
+        } catch {
+          // Ignore if capture was already released
+        }
         activePointerId.current = null;
       }
       dispatchGalleryState(1.0, boundaryState.current, true);
-      if (boundaryState.current === "bottom")
+      if (boundaryState.current === "bottom") {
         document
           .getElementById("trending-section")
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      else if (boundaryState.current === "top")
+      } else if (boundaryState.current === "top") {
         window.scrollTo({ top: 0, behavior: "smooth" });
+      }
       window.setTimeout(() => {
         isExitingGallery.current = false;
         dispatchGalleryState(0, "none", false);

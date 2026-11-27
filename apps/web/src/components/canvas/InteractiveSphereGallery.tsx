@@ -5,21 +5,24 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowRight } from "lucide-react";
 import Scene from "@/components/canvas/Scene";
 import SphereGallery from "@/components/canvas/SphereGallery";
+import { preloadAllGalleryTextures } from "@/components/canvas/galleryTextureStore";
 import { cn } from "@/lib/utils";
 
-interface InteractiveSphereGalleryProps {
+export interface InteractiveSphereGalleryProps {
   onIntroComplete?: () => void;
+  isVisible?: boolean;
 }
 
 type IntroPhase = "loading" | "ready" | "entering" | "complete";
 
 export default function InteractiveSphereGallery({
   onIntroComplete,
+  isVisible = true,
 }: InteractiveSphereGalleryProps) {
   const [phase, setPhase] = useState<IntroPhase>("loading");
+  const [texturesReady, setTexturesReady] = useState(false);
   const [gpuReady, setGpuReady] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
-  const [, setSelectedProjectId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const onIntroCompleteRef = useRef(onIntroComplete);
@@ -27,31 +30,37 @@ export default function InteractiveSphereGallery({
     onIntroCompleteRef.current = onIntroComplete;
   }, [onIntroComplete]);
 
+  // Preload all 94 textures with monotonic progress
   useEffect(() => {
-    if (phase !== "loading") return;
-    const interval = setInterval(() => {
-      setLoadProgress((p) => {
-        if (p >= 90) {
-          clearInterval(interval);
-          return 90;
-        }
-        return p + 15;
-      });
-    }, 40);
-    return () => clearInterval(interval);
-  }, [phase]);
+    let active = true;
+    const isMobile = window.innerWidth < 768;
+
+    void preloadAllGalleryTextures(isMobile, (pct) => {
+      if (!active) return;
+      setLoadProgress((prev) => Math.max(prev, pct));
+    }).then(() => {
+      if (!active) return;
+      setLoadProgress((prev) => Math.max(prev, 98));
+      setTexturesReady(true);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
-    if (phase === "loading" && gpuReady) {
-      setLoadProgress(100);
+    if (phase === "loading" && texturesReady && gpuReady) {
       const timer = setTimeout(() => {
+        setLoadProgress(100);
         setPhase("ready");
-      }, 300);
+      }, 250);
       return () => clearTimeout(timer);
     }
-  }, [gpuReady, phase]);
+  }, [texturesReady, gpuReady, phase]);
 
-  const displayProgress = phase === "loading" ? loadProgress : 100;
+  const displayProgress =
+    phase === "loading" ? (gpuReady ? 100 : loadProgress) : 100;
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -72,11 +81,13 @@ export default function InteractiveSphereGallery({
   }, [phase]);
 
   useEffect(() => {
+    if (!isVisible) return;
+
     let ticking = false;
     const handleScroll = () => {
       if (!containerRef.current) return;
       const scrollY = window.scrollY;
-      const windowHeight = window.innerHeight;
+      const windowHeight = window.innerHeight || 1;
       const opacity = Math.max(1 - scrollY / (windowHeight * 0.8), 0);
       if (!ticking) {
         window.requestAnimationFrame(() => {
@@ -91,37 +102,51 @@ export default function InteractiveSphereGallery({
     handleScroll();
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [isVisible]);
 
   const isReady = phase === "ready";
   const isEntering = phase === "entering";
   const isComplete = phase === "complete";
+  const isSceneRevealed = isEntering || isComplete;
 
   return (
     <div
       ref={containerRef}
       className="absolute inset-0 w-full h-full will-change-[opacity]"
     >
-      <Scene>
-        <SphereGallery
-          triggerIntro={isEntering || isComplete}
-          onReady={() => setGpuReady(true)}
-          onIntroComplete={() => {
-            setPhase("complete");
-            if (onIntroCompleteRef.current) onIntroCompleteRef.current();
-          }}
-        />
-      </Scene>
+      {/* Keep WebGL mounted for silent GPU shader warm-up, but invisible until Enter Peak is clicked */}
+      <div
+        className={cn(
+          "absolute inset-0 w-full h-full transition-opacity duration-1000 ease-out",
+          isSceneRevealed
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none",
+        )}
+      >
+        <Scene isVisible={isVisible}>
+          {texturesReady && (
+            <SphereGallery
+              triggerIntro={isSceneRevealed}
+              onReady={() => setGpuReady(true)}
+              onIntroComplete={() => {
+                setPhase("complete");
+                if (onIntroCompleteRef.current) onIntroCompleteRef.current();
+              }}
+            />
+          )}
+        </Scene>
+      </div>
+
       {!isComplete && (
         <div
           className={cn(
-            "absolute inset-0 flex flex-col items-center justify-center z-50",
+            "absolute inset-0 flex flex-col items-center justify-center z-40 pb-24 md:pb-24",
             "transition-all duration-[1500ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             isEntering
               ? "opacity-0 pointer-events-none scale-105 bg-transparent backdrop-blur-none"
               : isReady
-                ? "opacity-100 bg-background/60 backdrop-blur-sm"
-                : "opacity-100 bg-background/95 backdrop-blur-xl",
+                ? "opacity-100 bg-background/25 backdrop-blur-[2px]"
+                : "opacity-100 bg-background/85 backdrop-blur-md",
           )}
         >
           <div
@@ -143,16 +168,16 @@ export default function InteractiveSphereGallery({
                   : "translate-y-0 opacity-100",
               )}
             >
-              <span className="text-xs md:text-sm font-bold tracking-[0.3em] uppercase text-primary mb-4 drop-shadow-md">
+              <span className="text-xs md:text-sm font-bold tracking-[0.3em] uppercase text-primary mb-3 drop-shadow-md">
                 Welcome to Animanga
               </span>
-              <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tighter uppercase text-foreground mb-6 drop-shadow-2xl">
+              <h1 className="text-4xl md:text-6xl lg:text-7xl font-black tracking-tighter uppercase text-foreground mb-5 drop-shadow-2xl">
                 Your Universe <br className="hidden md:block" />
-                <span className="text-foreground/70">Of Anime & Manga</span>
+                <span className="text-foreground/70">Of Anime &amp; Manga</span>
               </h1>
-              <p className="text-sm md:text-base lg:text-lg font-medium text-foreground/60 tracking-wide mb-12 max-w-2xl leading-relaxed">
-                Discover what's airing, find your next obsession, explore manga,
-                meet the community, and experience the culture beyond the
+              <p className="text-sm md:text-base lg:text-lg font-medium text-foreground/60 tracking-wide mb-8 md:mb-10 max-w-2xl leading-relaxed">
+                Discover what&apos;s airing, find your next obsession, explore
+                manga, meet the community, and experience the culture beyond the
                 screen.
               </p>
             </div>
@@ -203,7 +228,7 @@ export default function InteractiveSphereGallery({
 
             <div
               className={cn(
-                "mt-8 text-[10px] md:text-xs font-bold tracking-[0.3em] uppercase transition-opacity duration-1000 flex items-center",
+                "mt-5 text-[10px] md:text-xs font-bold tracking-[0.3em] uppercase transition-opacity duration-1000 flex items-center",
                 isReady
                   ? "opacity-100 text-primary"
                   : "opacity-0 text-foreground/40",
