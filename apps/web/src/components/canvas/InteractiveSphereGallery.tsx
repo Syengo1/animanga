@@ -266,7 +266,7 @@ export default function InteractiveSphereGallery({
                   isReady ? "opacity-100" : "opacity-0",
                 )}
               >
-                <span className="drop-shadow-md">Enter Peak</span>
+                <span className="drop-shadow-md">View Scenes</span>
                 <ArrowRight className="w-5 h-5 ml-3 transition-transform group-hover:translate-x-1" />
                 <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-foreground/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
