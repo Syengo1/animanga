@@ -9,9 +9,14 @@ import { getThemeTokens } from "@/config/theme.config";
 interface SceneProps {
   children?: React.ReactNode;
   isVisible?: boolean;
+  onPointerMissed?: () => void;
 }
 
-export default function Scene({ children, isVisible = true }: SceneProps) {
+export default function Scene({
+  children,
+  isVisible = true,
+  onPointerMissed,
+}: SceneProps) {
   const { resolvedTheme } = useTheme();
   const { fogColor } = getThemeTokens(resolvedTheme);
 
@@ -28,6 +33,7 @@ export default function Scene({ children, isVisible = true }: SceneProps) {
           depth: true,
         }}
         dpr={[1, 2]}
+        onPointerMissed={onPointerMissed}
         onCreated={({ gl }) => {
           gl.domElement.addEventListener(
             "webglcontextlost",

@@ -5,6 +5,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowRight } from "lucide-react";
 import Scene from "@/components/canvas/Scene";
 import SphereGallery from "@/components/canvas/SphereGallery";
+import GalleryCaptionOverlay, {
+  type SelectedGalleryItem,
+  type GalleryPointerState,
+} from "@/components/canvas/GalleryCaptionOverlay";
 import { preloadAllGalleryTextures } from "@/components/canvas/galleryTextureStore";
 import { cn } from "@/lib/utils";
 
@@ -23,12 +27,34 @@ export default function InteractiveSphereGallery({
   const [texturesReady, setTexturesReady] = useState(false);
   const [gpuReady, setGpuReady] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
+  const [selectedItem, setSelectedItem] = useState<SelectedGalleryItem | null>(
+    null,
+  );
+  const [clearSignal, setClearSignal] = useState(0);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const introCompleteFiredRef = useRef(false);
+  const pointerRef = useRef<GalleryPointerState>({
+    x: 0,
+    y: 0,
+    containerWidth: 1280,
+    containerHeight: 720,
+    isTouch: false,
+    initialized: false,
+  });
 
   const onIntroCompleteRef = useRef(onIntroComplete);
   useEffect(() => {
     onIntroCompleteRef.current = onIntroComplete;
   }, [onIntroComplete]);
+
+  const finishIntroOnce = useCallback(() => {
+    setPhase("complete");
+    if (!introCompleteFiredRef.current) {
+      introCompleteFiredRef.current = true;
+      onIntroCompleteRef.current?.();
+    }
+  }, []);
 
   // Preload all 94 textures with monotonic progress
   useEffect(() => {
@@ -51,34 +77,64 @@ export default function InteractiveSphereGallery({
 
   useEffect(() => {
     if (phase === "loading" && texturesReady && gpuReady) {
-      const timer = setTimeout(() => {
+      const timer = window.setTimeout(() => {
         setLoadProgress(100);
         setPhase("ready");
       }, 250);
-      return () => clearTimeout(timer);
+      return () => window.clearTimeout(timer);
     }
   }, [texturesReady, gpuReady, phase]);
 
   const displayProgress =
     phase === "loading" ? (gpuReady ? 100 : loadProgress) : 100;
 
+  // Safety fallback slightly after the 2.0s GSAP camera dive in case WebGL is throttled
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (phase === "entering") {
-      timer = setTimeout(() => {
-        setPhase("complete");
-        if (onIntroCompleteRef.current) onIntroCompleteRef.current();
-      }, 1800);
-    }
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [phase]);
+    if (phase !== "entering") return;
+    const timer = window.setTimeout(finishIntroOnce, 2150);
+    return () => window.clearTimeout(timer);
+  }, [phase, finishIntroOnce]);
 
   const handleEnter = useCallback(() => {
     if (phase !== "ready") return;
     setPhase("entering");
   }, [phase]);
+
+  const handleGpuReady = useCallback(() => {
+    setGpuReady(true);
+  }, []);
+
+  const dismissSelection = useCallback(() => {
+    setClearSignal((n) => n + 1);
+  }, []);
+
+  // Dismiss focused card cleanly on Escape
+  useEffect(() => {
+    if (!selectedItem) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") dismissSelection();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedItem, dismissSelection]);
+
+  // Track pointer position relative to the hero stage (zero React re-renders)
+  const updateStagePointer = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      pointerRef.current.x = e.clientX - rect.left;
+      pointerRef.current.y = e.clientY - rect.top;
+      pointerRef.current.containerWidth = rect.width;
+      pointerRef.current.containerHeight = rect.height;
+      pointerRef.current.isTouch = e.pointerType !== "mouse";
+      pointerRef.current.initialized = true;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isVisible) return;
@@ -112,9 +168,13 @@ export default function InteractiveSphereGallery({
   return (
     <div
       ref={containerRef}
+      onPointerMove={updateStagePointer}
+      onPointerEnter={updateStagePointer}
+      onPointerDown={updateStagePointer}
+      onPointerLeave={dismissSelection}
       className="absolute inset-0 w-full h-full will-change-[opacity]"
     >
-      {/* Keep WebGL mounted for silent GPU shader warm-up, but invisible until Enter Peak is clicked */}
+      {/* Keep WebGL mounted for silent GPU shader warm-up, invisible until Enter Peak is clicked */}
       <div
         className={cn(
           "absolute inset-0 w-full h-full transition-opacity duration-1000 ease-out",
@@ -123,19 +183,25 @@ export default function InteractiveSphereGallery({
             : "opacity-0 pointer-events-none",
         )}
       >
-        <Scene isVisible={isVisible}>
+        <Scene isVisible={isVisible} onPointerMissed={dismissSelection}>
           {texturesReady && (
             <SphereGallery
               triggerIntro={isSceneRevealed}
-              onReady={() => setGpuReady(true)}
-              onIntroComplete={() => {
-                setPhase("complete");
-                if (onIntroCompleteRef.current) onIntroCompleteRef.current();
-              }}
+              clearSignal={clearSignal}
+              onSelectProject={setSelectedItem}
+              onReady={handleGpuReady}
+              onIntroComplete={finishIntroOnce}
             />
           )}
         </Scene>
       </div>
+
+      {/* Backgroundless Fluid Snake Cursor / Touch Caption Overlay */}
+      <GalleryCaptionOverlay
+        selected={selectedItem}
+        pointerRef={pointerRef}
+        enabled={isComplete && isVisible}
+      />
 
       {!isComplete && (
         <div

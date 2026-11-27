@@ -1,22 +1,28 @@
 // C:\Projects\animanga-platform\apps\web\src\components\canvas\SphereGallery.tsx
-import { useRef, useEffect, useState, useMemo } from "react";
+import { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import gsap from "gsap";
 import GalleryImage from "./GalleryImage";
 import CameraController from "./CameraController";
+import type { SelectedGalleryItem } from "./GalleryCaptionOverlay";
 import { projectsData } from "@/lib/data";
 import type { ProjectData, CalculatedProjectData } from "@/lib/data";
 
 interface SphereGalleryProps {
-  onSelectProject?: (id: string | null) => void;
+  onSelectProject?: (item: SelectedGalleryItem | null) => void;
+  clearSignal?: number;
   triggerIntro: boolean;
   onReady?: () => void;
   onIntroComplete?: () => void;
 }
 
+const STOP_SETTLE_MS = 180; // Cursor is considered stopped after 180ms without movement
+const STOP_SPEED_THRESHOLD_PX_S = 28;
+
 export default function SphereGallery({
   onSelectProject,
+  clearSignal = 0,
   triggerIntro,
   onReady,
   onIntroComplete,
@@ -27,14 +33,29 @@ export default function SphereGallery({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isDiveComplete, setIsDiveComplete] = useState(false);
 
+  // Sync external clear signal (leaving hero stage, tapping empty space, or pressing Escape)
+  const [prevClearSignal, setPrevClearSignal] = useState(clearSignal);
+  if (prevClearSignal !== clearSignal) {
+    setPrevClearSignal(clearSignal);
+    if (hoveredId !== null) {
+      setHoveredId(null);
+    }
+  }
+
   const globalCurveX = useRef(0);
   const globalTiltAngle = useRef(0);
+  const isDraggingRef = useRef(false);
 
-  // Track raw velocity for smoothing
   const rawVelX = useRef(0);
   const rawVelY = useRef(0);
   const smoothVelX = useRef(0);
   const smoothVelY = useRef(0);
+
+  // Continuous-drag state refs
+  const pointerOverIdRef = useRef<string | null>(null);
+  const committedHoverIdRef = useRef<string | null>(null);
+  const lastMoveTimeRef = useRef<number>(0);
+  const lastLeaveTimeRef = useRef<number>(0);
 
   const readySignaled = useRef(false);
   const frameCounter = useRef(0);
@@ -42,10 +63,66 @@ export default function SphereGallery({
 
   const onReadyRef = useRef(onReady);
   const onIntroCompleteRef = useRef(onIntroComplete);
+  const onSelectProjectRef = useRef(onSelectProject);
+
+  useEffect(() => {
+    committedHoverIdRef.current = hoveredId;
+  }, [hoveredId]);
+
   useEffect(() => {
     onReadyRef.current = onReady;
     onIntroCompleteRef.current = onIntroComplete;
-  }, [onReady, onIntroComplete]);
+    onSelectProjectRef.current = onSelectProject;
+  }, [onReady, onIntroComplete, onSelectProject]);
+
+  useEffect(() => {
+    pointerOverIdRef.current = null;
+    committedHoverIdRef.current = null;
+  }, [clearSignal]);
+
+  // Instant pickup on Image A and instantaneous A -> B handoff on contact
+  const handleCardHoverEnter = useCallback((id: string) => {
+    pointerOverIdRef.current = id;
+    lastMoveTimeRef.current = performance.now();
+    if (isDraggingRef.current) return;
+
+    if (committedHoverIdRef.current !== id) {
+      committedHoverIdRef.current = id;
+      setHoveredId(id);
+    }
+  }, []);
+
+  // Leaving a card NEVER breaks the effect mid-motion; it records empty space so
+  // the cursor keeps dragging Image A until it touches Image B or stops on empty space.
+  const handleCardHoverLeave = useCallback((id: string) => {
+    if (pointerOverIdRef.current === id) {
+      pointerOverIdRef.current = null;
+      lastLeaveTimeRef.current = performance.now();
+    }
+  }, []);
+
+  const handleCardTouchToggle = useCallback((id: string) => {
+    pointerOverIdRef.current = null;
+    setHoveredId((prev) => {
+      const next = prev === id ? null : id;
+      committedHoverIdRef.current = next;
+      return next;
+    });
+  }, []);
+
+  // Fast O(1) lookup from project.id -> SelectedGalleryItem
+  const projectLookup = useMemo(() => {
+    const map = new Map<string, SelectedGalleryItem>();
+    for (let i = 0; i < projectsData.length; i++) {
+      const proj = projectsData[i];
+      map.set(proj.project.id, {
+        project: proj,
+        index: i,
+        total: projectsData.length,
+      });
+    }
+    return map;
+  }, []);
 
   // Layout Calculation Engine (Exact original desktop & mobile geometry)
   const { layoutData, topBoundary, bottomBoundary, galleryRadius } =
@@ -166,7 +243,7 @@ export default function SphereGallery({
       };
     }, [size.width, size.height, isMobile]);
 
-  // Cinematic Entrance GSAP (One-Shot Guarded — immune to viewport resize/rotation reverts)
+  // Cinematic Entrance GSAP (One-Shot Guarded)
   useEffect(() => {
     if (!triggerIntro || introStarted.current) return;
     introStarted.current = true;
@@ -197,7 +274,7 @@ export default function SphereGallery({
     return () => ctx.revert();
   }, [get, triggerIntro]);
 
-  // Pointer Interaction Tracking (Desktop mouse only)
+  // Pointer Motion Tracking (Desktop mouse only)
   useEffect(() => {
     if (isMobile) return;
 
@@ -211,6 +288,8 @@ export default function SphereGallery({
       if (e.pointerType !== "mouse") return;
 
       const currentTime = performance.now();
+      lastMoveTimeRef.current = currentTime;
+
       if (!initialized) {
         lastX = e.clientX;
         lastY = e.clientY;
@@ -229,7 +308,7 @@ export default function SphereGallery({
       timeoutId = setTimeout(() => {
         rawVelX.current = 0;
         rawVelY.current = 0;
-      }, 100);
+      }, 120);
 
       lastX = e.clientX;
       lastY = e.clientY;
@@ -246,7 +325,6 @@ export default function SphereGallery({
   }, [isMobile]);
 
   useFrame((_, delta) => {
-    // 3-Frame WebGL Warm-up Heuristic
     if (!readySignaled.current && onReadyRef.current) {
       frameCounter.current += 1;
       if (frameCounter.current >= 3) {
@@ -258,7 +336,7 @@ export default function SphereGallery({
     if (isMobile) return;
 
     const safeDelta = Math.min(delta, 0.1);
-    const lerpAlpha = Math.min(1, 10 * safeDelta);
+    const lerpAlpha = Math.min(1, 4.2 * safeDelta);
 
     smoothVelX.current = THREE.MathUtils.lerp(
       smoothVelX.current,
@@ -272,9 +350,9 @@ export default function SphereGallery({
     );
 
     globalCurveX.current = THREE.MathUtils.clamp(
-      THREE.MathUtils.lerp(0, 0.2, Math.abs(smoothVelX.current) / 500),
+      THREE.MathUtils.lerp(0, 0.16, Math.abs(smoothVelX.current) / 580),
       0,
-      0.3,
+      0.24,
     );
 
     globalTiltAngle.current = THREE.MathUtils.degToRad(
@@ -282,13 +360,47 @@ export default function SphereGallery({
         ? THREE.MathUtils.clamp((smoothVelY.current / 100) * 30, -30, 30)
         : 0,
     );
+
+    // Break continuous drag ONLY when the cursor comes to a stop over empty/blank space
+    if (
+      committedHoverIdRef.current !== null &&
+      pointerOverIdRef.current === null
+    ) {
+      const now = performance.now();
+      const sinceMove = now - lastMoveTimeRef.current;
+      const sinceLeave = now - lastLeaveTimeRef.current;
+      const speed = Math.hypot(smoothVelX.current, smoothVelY.current);
+
+      if (
+        sinceMove >= STOP_SETTLE_MS &&
+        sinceLeave >= STOP_SETTLE_MS &&
+        speed < STOP_SPEED_THRESHOLD_PX_S
+      ) {
+        committedHoverIdRef.current = null;
+        setHoveredId(null);
+      }
+    }
   });
 
+  // Notify parent overlay whenever committed focus changes
   useEffect(() => {
-    if (onSelectProject) {
-      onSelectProject(hoveredId);
+    if (!onSelectProjectRef.current) return;
+    if (!hoveredId) {
+      onSelectProjectRef.current(null);
+      return;
     }
-  }, [hoveredId, onSelectProject]);
+    onSelectProjectRef.current(projectLookup.get(hoveredId) ?? null);
+  }, [hoveredId, projectLookup]);
+
+  const handleDraggingChange = useCallback((dragging: boolean) => {
+    isDraggingRef.current = dragging;
+  }, []);
+
+  const handleDragStart = useCallback(() => {
+    pointerOverIdRef.current = null;
+    committedHoverIdRef.current = null;
+    setHoveredId(null);
+  }, []);
 
   return (
     <group>
@@ -297,6 +409,9 @@ export default function SphereGallery({
         topBoundary={topBoundary}
         bottomBoundary={bottomBoundary}
         galleryRadius={galleryRadius}
+        isFocused={hoveredId !== null}
+        onDraggingChange={handleDraggingChange}
+        onDragStart={handleDragStart}
       />
       {layoutData.map((data: CalculatedProjectData, index: number) => (
         <GalleryImage
@@ -304,9 +419,13 @@ export default function SphereGallery({
           data={data}
           globalCurveX={globalCurveX}
           globalTiltAngle={globalTiltAngle}
+          isDraggingRef={isDraggingRef}
           hoveredId={hoveredId}
-          setHoveredId={setHoveredId}
+          onHoverEnter={handleCardHoverEnter}
+          onHoverLeave={handleCardHoverLeave}
+          onTouchToggle={handleCardTouchToggle}
           triggerIntro={triggerIntro}
+          introCompleted={isDiveComplete}
         />
       ))}
     </group>

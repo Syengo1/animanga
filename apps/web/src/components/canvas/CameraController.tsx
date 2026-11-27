@@ -3,26 +3,80 @@ import { useEffect, useRef } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
+interface CameraControllerProps {
+  introCompleted: boolean;
+  topBoundary?: number;
+  bottomBoundary?: number;
+  galleryRadius?: number;
+  isFocused?: boolean;
+  onDraggingChange?: (dragging: boolean) => void;
+  onDragStart?: () => void;
+}
+
+const DRAG_THRESHOLD_PX = 10;
+const NAVBAR_HEIGHT_PX = 64;
+
+function dispatchGalleryState(
+  intentProgress: number,
+  boundary: "none" | "top" | "bottom",
+  ready = false,
+) {
+  window.dispatchEvent(
+    new CustomEvent("gallery-overscroll", {
+      detail: { intentProgress, boundary, ready },
+    }),
+  );
+}
+
 export default function CameraController({
   introCompleted,
   topBoundary = 0,
   bottomBoundary = 0,
   galleryRadius = 2500,
-}: {
-  introCompleted: boolean;
-  topBoundary?: number;
-  bottomBoundary?: number;
-  galleryRadius?: number;
-}) {
+  isFocused = false,
+  onDraggingChange,
+  onDragStart,
+}: CameraControllerProps) {
   const { get, size } = useThree();
   const isMobile = size.width < 768;
 
   // Immortal Physics State
   const isDragging = useRef(false);
+  const hasExceededDragThreshold = useRef(false);
   const isExitingGallery = useRef(false);
   const activePointerId = useRef<number | null>(null);
+  const isFocusedRef = useRef(isFocused);
+  const currentLambda = useRef(1.65);
+  const exitResetTimerRef = useRef<number | null>(null);
 
-  const pointer = useRef({ lastX: 0, lastY: 0, vX: 0, vY: 0 });
+  const onDraggingChangeRef = useRef(onDraggingChange);
+  const onDragStartRef = useRef(onDragStart);
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
+
+  useEffect(() => {
+    onDraggingChangeRef.current = onDraggingChange;
+    onDragStartRef.current = onDragStart;
+  }, [onDraggingChange, onDragStart]);
+
+  useEffect(() => {
+    return () => {
+      if (exitResetTimerRef.current !== null) {
+        window.clearTimeout(exitResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const pointer = useRef({
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    vX: 0,
+    vY: 0,
+  });
   const targets = useRef({ rotY: 0, posY: 0 });
   const bounds = useRef({
     minCameraY: 0,
@@ -36,18 +90,6 @@ export default function CameraController({
   const isHoldingToContinue = useRef(false);
   const holdStartTime = useRef<number | null>(null);
   const boundaryState = useRef<"none" | "top" | "bottom">("none");
-
-  const dispatchGalleryState = (
-    intentProgress: number,
-    boundary: "none" | "top" | "bottom",
-    ready = false,
-  ) => {
-    window.dispatchEvent(
-      new CustomEvent("gallery-overscroll", {
-        detail: { intentProgress, boundary, ready },
-      }),
-    );
-  };
 
   useEffect(() => {
     if (!introCompleted) return;
@@ -98,7 +140,10 @@ export default function CameraController({
     const handlePointerDown = (e: PointerEvent) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       isDragging.current = true;
+      hasExceededDragThreshold.current = false;
       activePointerId.current = e.pointerId;
+      pointer.current.startX = e.clientX;
+      pointer.current.startY = e.clientY;
       pointer.current.lastX = e.clientX;
       pointer.current.lastY = e.clientY;
       pointer.current.vX = 0;
@@ -119,6 +164,7 @@ export default function CameraController({
     };
 
     const handlePointerMove = (e: PointerEvent) => {
+      // Fluid mouse-linked camera exploration on desktop
       if (e.pointerType === "mouse" && !isDragging.current) {
         const ndcX = (e.clientX / viewport.current.w) * 2 - 1;
         const ndcY = -(e.clientY / viewport.current.h) * 2 + 1;
@@ -132,19 +178,33 @@ export default function CameraController({
         targets.current.rotY = -ndcX * bounds.current.hLimit;
         return;
       }
+
       if (!isDragging.current) return;
+
       const deltaX = e.clientX - pointer.current.lastX;
       const deltaY = e.clientY - pointer.current.lastY;
-      pointer.current.vX = deltaX;
-      pointer.current.vY = deltaY;
+      const totalDist = Math.hypot(
+        e.clientX - pointer.current.startX,
+        e.clientY - pointer.current.startY,
+      );
+
+      if (!hasExceededDragThreshold.current && totalDist > DRAG_THRESHOLD_PX) {
+        hasExceededDragThreshold.current = true;
+        onDraggingChangeRef.current?.(true);
+        onDragStartRef.current?.();
+      }
+
+      // Smooth velocity tracking for natural release coasting
+      pointer.current.vX = pointer.current.vX * 0.45 + deltaX * 0.55;
+      pointer.current.vY = pointer.current.vY * 0.45 + deltaY * 0.55;
       pointer.current.lastX = e.clientX;
       pointer.current.lastY = e.clientY;
 
-      targets.current.rotY += (deltaX / viewport.current.w) * Math.PI * 1.5;
+      targets.current.rotY += (deltaX / viewport.current.w) * Math.PI * 1.35;
       const intendedPosY =
         targets.current.posY +
         (deltaY / viewport.current.h) *
-          (bounds.current.visibleHalfHeight * 2.0);
+          (bounds.current.visibleHalfHeight * 1.85);
 
       if (isMobile && !isExitingGallery.current) {
         if (
@@ -194,7 +254,11 @@ export default function CameraController({
 
     const handlePointerUp = () => {
       if (!isDragging.current) return;
+      const wasRealDrag = hasExceededDragThreshold.current;
       isDragging.current = false;
+      hasExceededDragThreshold.current = false;
+      onDraggingChangeRef.current?.(false);
+
       if (activePointerId.current !== null) {
         try {
           canvasEl.releasePointerCapture(activePointerId.current);
@@ -219,17 +283,18 @@ export default function CameraController({
         boundaryState.current = "none";
         pointer.current.vY = 0;
         dispatchGalleryState(0, "none", false);
-      } else if (boundaryState.current === "none") {
+      } else if (wasRealDrag && boundaryState.current === "none") {
+        // Weighted physical inertia coast on swipe release
         if (
-          Math.abs(pointer.current.vX) > 2 ||
-          Math.abs(pointer.current.vY) > 2
+          Math.abs(pointer.current.vX) > 1.5 ||
+          Math.abs(pointer.current.vY) > 1.5
         ) {
           targets.current.rotY +=
-            (pointer.current.vX / viewport.current.w) * Math.PI * 3;
+            (pointer.current.vX / viewport.current.w) * Math.PI * 2.4;
           targets.current.posY = THREE.MathUtils.clamp(
             targets.current.posY +
               (pointer.current.vY / viewport.current.h) *
-                (bounds.current.visibleHalfHeight * 6),
+                (bounds.current.visibleHalfHeight * 4.5),
             bounds.current.minCameraY,
             bounds.current.maxCameraY,
           );
@@ -248,6 +313,7 @@ export default function CameraController({
     window.addEventListener("pointercancel", handlePointerUp);
     return () => {
       canvasEl.style.touchAction = prevTouchAction;
+      onDraggingChangeRef.current?.(false);
       window.removeEventListener("pointermove", handlePointerMove);
       canvasEl.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("pointerup", handlePointerUp);
@@ -257,44 +323,58 @@ export default function CameraController({
 
   useFrame((_, delta) => {
     const { camera, gl } = get();
+    const holdStart = holdStartTime.current;
 
     if (
       !isMobile ||
       isExitingGallery.current ||
       !isHoldingToContinue.current ||
-      holdStartTime.current === null
+      holdStart === null
     ) {
       if (introCompleted) {
         const safeDelta = Math.min(delta, 0.1);
-        if (isDragging.current) {
-          camera.rotation.y = targets.current.rotY;
-          camera.position.y = targets.current.posY;
-        } else {
-          camera.rotation.y = THREE.MathUtils.damp(
-            camera.rotation.y,
-            targets.current.rotY,
-            4,
-            safeDelta,
-          );
-          camera.position.y = THREE.MathUtils.damp(
-            camera.position.y,
-            targets.current.posY,
-            4,
-            safeDelta,
-          );
-        }
+        // Viscous, fluid damping:
+        // - Active drag: responsive yet silky (8.5)
+        // - Desktop hover focus: gently cushioned (0.85) so cards stay steady while reading
+        // - Free cruise / inertial coast: weighted & smooth (1.65 desktop / 2.2 mobile)
+        const targetLambda = isDragging.current
+          ? 8.5
+          : isMobile
+            ? 2.2
+            : isFocusedRef.current
+              ? 0.85
+              : 1.65;
+
+        currentLambda.current = THREE.MathUtils.damp(
+          currentLambda.current,
+          targetLambda,
+          3.0,
+          safeDelta,
+        );
+
+        camera.rotation.y = THREE.MathUtils.damp(
+          camera.rotation.y,
+          targets.current.rotY,
+          currentLambda.current,
+          safeDelta,
+        );
+        camera.position.y = THREE.MathUtils.damp(
+          camera.position.y,
+          targets.current.posY,
+          currentLambda.current,
+          safeDelta,
+        );
         camera.updateMatrixWorld();
       }
       return;
     }
 
-    const progress = Math.min(
-      (performance.now() - holdStartTime.current) / 1500,
-      1.0,
-    );
+    const progress = Math.min((performance.now() - holdStart) / 1500, 1.0);
     if (progress >= 1.0) {
       isExitingGallery.current = true;
       isDragging.current = false;
+      hasExceededDragThreshold.current = false;
+      onDraggingChangeRef.current?.(false);
       isHoldingToContinue.current = false;
       holdStartTime.current = null;
       if (activePointerId.current !== null) {
@@ -307,14 +387,25 @@ export default function CameraController({
       }
       dispatchGalleryState(1.0, boundaryState.current, true);
       if (boundaryState.current === "bottom") {
-        document
-          .getElementById("trending-section")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const trendingEl = document.getElementById("trending-section");
+        if (trendingEl) {
+          const targetTop = Math.max(
+            0,
+            trendingEl.getBoundingClientRect().top +
+              window.scrollY -
+              NAVBAR_HEIGHT_PX,
+          );
+          window.scrollTo({ top: targetTop, behavior: "smooth" });
+        }
       } else if (boundaryState.current === "top") {
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
-      window.setTimeout(() => {
+      if (exitResetTimerRef.current !== null) {
+        window.clearTimeout(exitResetTimerRef.current);
+      }
+      exitResetTimerRef.current = window.setTimeout(() => {
         isExitingGallery.current = false;
+        exitResetTimerRef.current = null;
         dispatchGalleryState(0, "none", false);
       }, 900);
     } else {

@@ -2,6 +2,7 @@
 import { useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
+import type { ThreeEvent } from "@react-three/fiber";
 import gsap from "gsap";
 
 import "./GalleryShaderMaterial";
@@ -34,25 +35,42 @@ type GalleryMaterialType = THREE.ShaderMaterial & {
 
 interface GalleryImageProps {
   data: CalculatedProjectData;
-  globalCurveX: React.MutableRefObject<number>;
-  globalTiltAngle: React.MutableRefObject<number>;
+  globalCurveX: React.RefObject<number>;
+  globalTiltAngle: React.RefObject<number>;
+  isDraggingRef: React.RefObject<boolean>;
   hoveredId: string | null;
-  setHoveredId: React.Dispatch<React.SetStateAction<string | null>>;
+  onHoverEnter: (id: string) => void;
+  onHoverLeave: (id: string) => void;
+  onTouchToggle: (id: string) => void;
   triggerIntro: boolean;
+  introCompleted: boolean;
 }
+
+const DIMMED_FOG_OPACITY = 0.14;
+const FOCUS_SCALE = 1.045;
+const TAP_MAX_DRIFT_PX = 10;
+const TAP_MAX_DURATION_MS = 320;
 
 export default function GalleryImage({
   data,
   globalCurveX,
   globalTiltAngle,
+  isDraggingRef,
   hoveredId,
-  setHoveredId,
+  onHoverEnter,
+  onHoverLeave,
+  onTouchToggle,
   triggerIntro,
+  introCompleted,
 }: GalleryImageProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<GalleryMaterialType>(null);
   const originalQuat = useRef<THREE.Quaternion>(new THREE.Quaternion());
   const hasHovered = useRef(false);
+  const hasRevealed = useRef(false);
+  const tapStartRef = useRef<{ x: number; y: number; time: number } | null>(
+    null,
+  );
 
   const { size } = useThree();
   const isMobile = size.width < 768;
@@ -61,6 +79,7 @@ export default function GalleryImage({
   useLayoutEffect(() => {
     if (!meshRef.current) return;
     meshRef.current.position.set(data.xPos, data.yPos, data.zPos);
+    meshRef.current.scale.set(1, 1, 1);
     meshRef.current.lookAt(0, data.yPos, 0);
     originalQuat.current.copy(meshRef.current.quaternion);
   }, [data.xPos, data.yPos, data.zPos]);
@@ -69,10 +88,17 @@ export default function GalleryImage({
     if (!materialRef.current || !meshRef.current) return;
     if (!triggerIntro) {
       materialRef.current.uOpacity = 0;
+      hasRevealed.current = false;
       return;
     }
 
     const safeOpacity = data.baseOpacity ?? 1;
+
+    if (hasRevealed.current) {
+      materialRef.current.uOpacity = safeOpacity;
+      return;
+    }
+    hasRevealed.current = true;
 
     const ctx = gsap.context(() => {
       gsap.fromTo(
@@ -100,9 +126,11 @@ export default function GalleryImage({
     return () => ctx.revert();
   }, [data.baseOpacity, triggerIntro]);
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
     const mat = materialRef.current;
     if (!mat) return;
+
+    const safeDelta = Math.min(delta, 0.1);
 
     if (state.scene.fog) {
       mat.uBgColor
@@ -111,47 +139,86 @@ export default function GalleryImage({
     }
 
     const targetCurveX = isMobile ? 0 : globalCurveX.current;
-    const diffX = targetCurveX - mat.uCurveAmountX;
-    if (Math.abs(diffX) > 0.0001) {
-      mat.uCurveAmountX += diffX * 0.05;
-    }
+    mat.uCurveAmountX = THREE.MathUtils.damp(
+      mat.uCurveAmountX,
+      targetCurveX,
+      2.6,
+      safeDelta,
+    );
 
     const targetTilt = isMobile ? 0 : globalTiltAngle.current * 0;
-    const diffTilt = targetTilt - mat.uTiltAngle;
-    if (Math.abs(diffTilt) > 0.0001) {
-      mat.uTiltAngle += diffTilt * 0.05;
-    }
+    mat.uTiltAngle = THREE.MathUtils.damp(
+      mat.uTiltAngle,
+      targetTilt,
+      2.6,
+      safeDelta,
+    );
   });
 
+  // Unhurried fog dissolve + subtle 3D forward lift for focused card
   useEffect(() => {
-    if (!materialRef.current || !triggerIntro) return;
+    const mat = materialRef.current;
+    const mesh = meshRef.current;
+    if (!mat || !mesh || !triggerIntro) return;
     if (hoveredId === null && !hasHovered.current) return;
 
     if (hoveredId !== null) {
       hasHovered.current = true;
     }
 
-    const isHovered = hoveredId === data.id;
+    const isFocused = hoveredId === data.id;
     const safeOpacity = data.baseOpacity ?? 1;
-    const dimmedOpacity = 0.5;
     const targetOpacity =
       hoveredId !== null
-        ? isHovered
+        ? isFocused
           ? safeOpacity
-          : dimmedOpacity
+          : DIMMED_FOG_OPACITY
         : safeOpacity;
 
+    const radialDist = Math.hypot(data.xPos, data.zPos) || 1;
+    const pullUnits = isFocused ? (isMobile ? 160 : 140) : 0;
+    const radialRatio = (radialDist - pullUnits) / radialDist;
+    const targetX = data.xPos * radialRatio;
+    const targetZ = data.zPos * radialRatio;
+    const targetScale = isFocused ? FOCUS_SCALE : 1;
+
+    mesh.renderOrder = isFocused ? 10 : 0;
+
     const ctx = gsap.context(() => {
-      gsap.to(materialRef.current, {
+      gsap.to(mat, {
         uOpacity: targetOpacity,
-        duration: 0.75,
-        ease: "power1.inOut",
+        duration: isFocused ? 0.85 : 1.1,
+        ease: "sine.inOut",
+        overwrite: "auto",
+      });
+
+      gsap.to(mesh.position, {
+        x: targetX,
+        z: targetZ,
+        duration: 1.15,
+        ease: "power2.out",
+        overwrite: "auto",
+      });
+
+      gsap.to(mesh.scale, {
+        x: targetScale,
+        y: targetScale,
+        duration: 1.15,
+        ease: "power2.out",
         overwrite: "auto",
       });
     });
 
     return () => ctx.revert();
-  }, [hoveredId, data.baseOpacity, data.id, triggerIntro]);
+  }, [
+    hoveredId,
+    data.baseOpacity,
+    data.id,
+    data.xPos,
+    data.zPos,
+    triggerIntro,
+    isMobile,
+  ]);
 
   const planeArgs = useMemo(
     () =>
@@ -164,21 +231,55 @@ export default function GalleryImage({
     [data.calcWidth, data.calcHeight, isMobile],
   );
 
+  const handlePointerEnter = (e: ThreeEvent<PointerEvent>) => {
+    if (!introCompleted || isMobile || isDraggingRef.current) return;
+    if (e.pointerType !== "mouse") return;
+    e.stopPropagation();
+    onHoverEnter(data.id);
+  };
+
+  const handlePointerLeave = (e: ThreeEvent<PointerEvent>) => {
+    if (!introCompleted || isMobile) return;
+    if (e.pointerType !== "mouse") return;
+    e.stopPropagation();
+    onHoverLeave(data.id);
+  };
+
+  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (!introCompleted) return;
+    if (e.pointerType === "mouse") return;
+    tapStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      time: performance.now(),
+    };
+  };
+
+  const handlePointerUp = (e: ThreeEvent<PointerEvent>) => {
+    if (!introCompleted) return;
+    if (e.pointerType === "mouse") return;
+    const start = tapStartRef.current;
+    tapStartRef.current = null;
+    if (!start) return;
+
+    const drift = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+    const elapsed = performance.now() - start.time;
+
+    if (drift <= TAP_MAX_DRIFT_PX && elapsed <= TAP_MAX_DURATION_MS) {
+      e.stopPropagation();
+      onTouchToggle(data.id);
+    }
+  };
+
   if (!texture) return null;
 
   return (
     <mesh
       ref={meshRef}
-      onPointerEnter={(e) => {
-        if (isMobile || window.matchMedia("(hover: none)").matches) return;
-        e.stopPropagation();
-        setHoveredId(data.id);
-      }}
-      onPointerLeave={(e) => {
-        if (isMobile || window.matchMedia("(hover: none)").matches) return;
-        e.stopPropagation();
-        setHoveredId(null);
-      }}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
     >
       <planeGeometry args={planeArgs} />
       <galleryShaderMaterial
@@ -188,7 +289,6 @@ export default function GalleryImage({
         uImageHeight={data.calcHeight}
         uSizeFactorX={data.calcWidth / 2000}
         uSizeFactorY={data.calcHeight / 2000}
-        uOpacity={0}
         transparent={false}
         side={THREE.DoubleSide}
       />
