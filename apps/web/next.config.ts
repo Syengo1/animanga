@@ -59,8 +59,7 @@ const nextConfig: NextConfig = {
   },
 
   images: {
-    formats: ["image/avif", "image/webp"],
-    minimumCacheTTL: 86400, // Cache optimized AniList covers for 24 hours at the CDN edge
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: "https",

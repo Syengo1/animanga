@@ -1276,7 +1276,7 @@ export const projectsData: ProjectData[] = [
     opacity: 1,
     project: {
       id: "animanga-gallery-78",
-      data: { title: "Leap of Faith", description: defaultDesc },
+      data: { title: "Boom Jump", description: defaultDesc },
     },
   },
   {
